@@ -142,6 +142,27 @@ else
   fail "nixos-module.nix not found at $NS_MODULE"
 fi
 
+echo "-- Home Manager baselines coexist with host shared modules --"
+if "$GREP" -q 'out ? homeBaseline' "$NS_MODULE" \
+  && "$GREP" -q 'out\.homeBaseline' "$NS_MODULE" \
+  && "$GREP" -q 'homeBaselineModules' "$NS_MODULE"; then
+  pass "nixos-module.nix collects homeBaseline outputs"
+else
+  fail "nixos-module.nix must collect homeBaseline outputs"
+fi
+if "$GREP" -q 'homeBaselineModules' "$NS_MODULE" \
+  && ! "$GREP" -q 'home-manager\.sharedModules = lib\.mkForce' "$NS_MODULE"; then
+  pass "Home Manager baselines do not replace the host sharedModules list"
+else
+  fail "homeBaseline must be added without forcing away existing sharedModules"
+fi
+if "$GREP" -q 'nix-scout-settings' "$NS_MODULE" \
+  && "$GREP" -q 'settings.nix' "$NS_MODULE"; then
+  pass "NixOS activation persists resolved settings.nix values for scout builds"
+else
+  fail "nixos-module.nix must persist resolved Nix settings for later scout builds"
+fi
+
 echo "-- bin/nix-scout: usage() and _facet_tags() know about baseline --"
 BIN="$REPO/bin/nix-scout"
 if [[ -f "$BIN" ]]; then

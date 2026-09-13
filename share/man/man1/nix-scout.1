@@ -1,4 +1,4 @@
-.TH NIX\-SCOUT 1 "September 2026" "nix\-scout 0.7.0" "User Commands"
+.TH NIX\-SCOUT 1 "September 2026" "nix\-scout 0.8.0" "User Commands"
 .SH NAME
 nix\-scout \- scout module switcher for NixOS
 .SH SYNOPSIS
@@ -44,6 +44,11 @@ with facet tags:
 .BR switch ).
 Each entry is a directory containing a
 .IR flake.nix .
+.TP
+.BI "inspect " name
+Evaluate one scout module and report its facets, settings source, adapter
+type, extracted units or home files, and rebuild-only masks. Resolved
+flakelet settings are reported by path without printing secret contents.
 .TP
 .BI "new " "name [facet\&.\&.\&.]"
 Scaffold a new scout module directory under
@@ -564,6 +569,24 @@ or the
 .B baseline
 facet for that.
 .PP
+Existing modules may be adapted with
+.BR nix\-scout.lib.nixosModule.flakelet ,
+.BR nix\-scout.lib.nixosModule.baseline ,
+.BR nix\-scout.lib.homeManagerModule.scout ,
+and
+.BR nix\-scout.lib.homeManagerModule.baseline .
+The NixOS adapter turns rendered systemd units into flakelet raw units and
+disables those units in the rebuild-only baseline. The Home Manager adapter
+turns the generated home-files tree into a scout package and disables those
+files in its Home Manager baseline. Supporting configuration remains active.
+Host-derived overrides stay in
+.IR settings.nix
+under the
+.B settings.nixos
+and
+.B settings.homeManager
+attributes.
+.PP
 Module
 .I flake.nix
 outputs receive
@@ -575,13 +598,11 @@ when the nix\-scout NixOS module prebuilds all scout modules during a system reb
 .B nix\-scout switch
 materializes the module and writes
 .IR scout\-context.nix
-with
-.BR systemRebuild = false ;
-modules should read it via
-.BR nix\-scout.lib.readSystemRebuild
-or the same
-.IR scout\-context.nix
-import pattern.
+with the switch mode, invoking user name, home directory, and resolved Nix
+settings. Modules should read it via
+.BR nix\-scout.lib.readContext .
+.B nix\-scout.lib.readSystemRebuild
+remains available when only the rebuild flag is needed.
 Use this to ship a lightweight stub during rebuild while installing the full payload
 only on explicit switch (e.g. seasonal or space\-heavy tools).
 .PP
@@ -616,6 +637,15 @@ This turns a silent, hard\-to\-diagnose failure in flakelet's own evaluation
 (which has no write access to fix a missing node, and no way to fake a real
 one) into an immediate, actionable rebuild error.
 .SH FILES
+.TP
+.I /var/lib/nix\-scout/settings/<module>.nix
+The resolved
+.B settings
+attrset from a module's
+.IR settings.nix .
+The switch materializer copies this Nix expression into the temporary module
+and exposes it through
+.IR scout\-context.nix .
 .TP
 .I ~/.local/state/nix\-scout/home-files/<module>.manifest
 Per\-module record of the home files nix\-scout last applied to

@@ -51,7 +51,7 @@
 
     packages.${system}.nix-scout = pkgs.stdenv.mkDerivation {
       pname = "nix-scout";
-      version = "0.7.0";
+      version = "0.8.0";
       src = ./.;
       dontBuild = true;
       nativeBuildInputs = [ pkgs.makeWrapper ];
@@ -60,6 +60,8 @@
         install -Dm755 $src/bin/nix-scout                $out/bin/nix-scout
         install -Dm755 $src/lib/materialize-module.sh  $out/lib/materialize-module.sh
         install -Dm644 $src/lib/scout-lib.sh           $out/lib/scout-lib.sh
+        install -Dm644 $src/lib/scout-module.nix       $out/lib/scout-module.nix
+        install -Dm644 $src/lib/module-adapters.nix    $out/lib/module-adapters.nix
         install -Dm755 $src/lib/new-module.sh          $out/lib/new-module.sh
         install -Dm755 $src/lib/update-module.sh       $out/lib/update-module.sh
         install -Dm755 $src/lib/apply-hm.sh            $out/lib/apply-hm.sh
@@ -91,27 +93,37 @@
       };
     };
 
-    # Run static (grep-only) contract checks without building the package.
-    # Integration suites (cli, hm-activate-files, materialize, profile-gcroots)
-    # require the binary and are run manually via tests/run.sh or ns-test.
-    # Static (grep-only) contract checks — no binary build required.
-    # Integration suites need the built binary; run those via tests/run.sh or ns-test.
-    checks.${system}.static-contracts = pkgs.runCommand "nix-scout-static-contracts"
-      { buildInputs = [ pkgs.bash pkgs.gnugrep pkgs.coreutils pkgs.findutils pkgs.diffutils ]; }
-      ''
-        export NIX_SCOUT_ROOT=${./.}
-        # Run from the whole-repo store path (not per-file store refs) so each
-        # suite's `source .../_lib.sh` sibling-lookup resolves.
-        bash "$NIX_SCOUT_ROOT/tests/module-mode.sh"
-        bash "$NIX_SCOUT_ROOT/tests/path-session.sh"
-        bash "$NIX_SCOUT_ROOT/tests/activation-clear.sh"
-        bash "$NIX_SCOUT_ROOT/tests/activation-home-files.sh"
-        bash "$NIX_SCOUT_ROOT/tests/flakelet.sh"
-        bash "$NIX_SCOUT_ROOT/tests/new-module.sh"
-        bash "$NIX_SCOUT_ROOT/tests/baseline.sh"
-        bash "$NIX_SCOUT_ROOT/tests/completions.sh"
-        touch $out
-      '';
+    checks.${system} = {
+      static-contracts = pkgs.runCommand "nix-scout-static-contracts"
+        { buildInputs = [ pkgs.bash pkgs.gnugrep pkgs.coreutils pkgs.findutils pkgs.diffutils ]; }
+        ''
+          cp -r ${./.} "$TMPDIR/nix-scout-source"
+          chmod -R u+w "$TMPDIR/nix-scout-source"
+          patchShebangs "$TMPDIR/nix-scout-source/bin" "$TMPDIR/nix-scout-source/lib"
+          export NIX_SCOUT_ROOT="$TMPDIR/nix-scout-source"
+          export USER=nix-scout-test
+          export HOME="$TMPDIR/home"
+          # Run from one writable whole-repo copy so sibling test fixtures are
+          # present and executable scripts have sandbox-valid shebangs.
+          bash "$NIX_SCOUT_ROOT/tests/module-mode.sh"
+          bash "$NIX_SCOUT_ROOT/tests/path-session.sh"
+          bash "$NIX_SCOUT_ROOT/tests/activation-clear.sh"
+          bash "$NIX_SCOUT_ROOT/tests/activation-home-files.sh"
+          bash "$NIX_SCOUT_ROOT/tests/flakelet.sh"
+          bash "$NIX_SCOUT_ROOT/tests/completions.sh"
+          touch $out
+        '';
+
+      module-adapters = import ./tests/module-adapters.nix {
+        inherit nixpkgs home-manager;
+        nixScout = self;
+      };
+
+      host-module = import ./tests/host-module.nix {
+        inherit nixpkgs home-manager flakelet;
+        nixScout = self;
+      };
+    };
 
     devShells.${system}.default = pkgs.mkShell {
       packages = with pkgs; [

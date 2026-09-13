@@ -22,6 +22,7 @@ suites=(
   activation-home-files.sh
   flakelet.sh
   baseline.sh
+  module-adapters.sh
   cli.sh
   new-module.sh
   completions.sh

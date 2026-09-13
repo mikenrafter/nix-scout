@@ -36,7 +36,7 @@ fi
 run_capture "$STRICT_BIN" --help
 if [[ "$CAPTURED_RC" -eq 0 || "$CAPTURED_RC" -eq 1 ]]; then
   HELP_TEXT="$CAPTURED_OUT$CAPTURED_ERR"
-  for sub in list switch status clear; do
+  for sub in list inspect switch status clear; do
     if [[ "$HELP_TEXT" == *"$sub"* ]]; then
       pass "--help mentions $sub"
     else
@@ -71,6 +71,27 @@ if [[ "$CAPTURED_RC" -eq 0 || "$CAPTURED_RC" -eq 1 ]]; then
   fi
 else
   fail "--help exited $CAPTURED_RC (stderr=$(printf %q "$CAPTURED_ERR"))"
+fi
+
+
+echo "-- inspect --"
+run_capture env NIX_SCOUT_PATHS_FILE="$NIX_SCOUT_PATHS_FILE" \
+  "$STRICT_BIN" inspect nix-scout
+if [[ "$CAPTURED_RC" -eq 0 \
+  && "$CAPTURED_OUT" == *"Module: nix-scout"* \
+  && "$CAPTURED_OUT" == *"Facets:"* \
+  && "$CAPTURED_OUT" == *"Settings:"* ]]; then
+  pass "inspect reports module, facets, and settings source"
+else
+  fail "inspect nix-scout failed: rc=$CAPTURED_RC out=$(printf %q "$CAPTURED_OUT$CAPTURED_ERR")"
+fi
+
+run_capture env NIX_SCOUT_PATHS_FILE="$NIX_SCOUT_PATHS_FILE" \
+  "$STRICT_BIN" inspect no-such-module
+if [[ "$CAPTURED_RC" -ne 0 && "$CAPTURED_ERR$CAPTURED_OUT" == *"module not found"* ]]; then
+  pass "inspect rejects an unknown module"
+else
+  fail "inspect must reject an unknown module"
 fi
 
 run_capture env NIX_SCOUT_PATHS_FILE="$NIX_SCOUT_PATHS_FILE" "$STRICT_BIN" list

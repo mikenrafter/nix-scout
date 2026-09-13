@@ -26,7 +26,7 @@ done
 
 run_capture "$STRICT_BIN" completions fish
 FISH="$CAPTURED_OUT"
-for token in list new switch status clear doctor completions help; do
+for token in list inspect new switch status clear doctor completions help; do
   if [[ "$FISH" == *"$token"* ]]; then
     pass "fish completions mention $token"
   else

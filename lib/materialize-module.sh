@@ -28,9 +28,38 @@ elif [[ ! -f "$tmp/flake.lock" ]]; then
   (cd "$tmp" && (nix flake lock --no-write-lock-file 2>/dev/null || nix flake lock) >/dev/null)
 fi
 
-cat > "$tmp/scout-context.nix" <<'EOF'
-{ systemRebuild = false; }
-EOF
+context_user="${NIX_SCOUT_USER:-${USER:-}}"
+context_home="${NIX_SCOUT_HOME:-${HOME:-}}"
+settings_dir="${NIX_SCOUT_SETTINGS_DIR:-/var/lib/nix-scout/settings}"
+module_name="$(basename "$MODULE_DIR")"
+resolved_settings="$settings_dir/$module_name.nix"
+
+if [[ -f "$resolved_settings" ]]; then
+  cp "$resolved_settings" "$tmp/scout-settings.nix"
+fi
+
+# JSON string syntax is also valid Nix string syntax. jq is already a
+# nix-scout runtime dependency and avoids hand-written escaping for paths.
+nix_string() {
+  jq -Rn --arg value "$1" '$value'
+}
+
+{
+  printf '%s\n' '{'
+  printf '%s\n' '  version = 1;'
+  printf '%s\n' '  mode = "switch";'
+  printf '%s\n' '  systemRebuild = false;'
+  if [[ -f "$tmp/scout-settings.nix" ]]; then
+    printf '%s\n' '  settings = import ./scout-settings.nix;'
+  else
+    printf '%s\n' '  settings = { };'
+  fi
+  printf '%s\n' '  user = {'
+  printf '    name = %s;\n' "$(nix_string "$context_user")"
+  printf '    homeDirectory = %s;\n' "$(nix_string "$context_home")"
+  printf '%s\n' '  };'
+  printf '%s\n' '}'
+} > "$tmp/scout-context.nix"
 
 export NIX_SCOUT_MATERIALIZED="$tmp"
 printf '%s\n' "$tmp"

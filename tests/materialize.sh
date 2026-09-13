@@ -32,6 +32,11 @@ if ! MAT="$(resolve_materialize_script)"; then
 fi
 pass "resolved materialize script at $MAT"
 
+RESOLVED_SETTINGS="$WORKDIR/resolved-settings"
+"$MKDIR" -p "$RESOLVED_SETTINGS"
+printf '%s\n' '{ homeManager.programs.fixture.message = "resolved"; }' \
+  > "$RESOLVED_SETTINGS/nix-scout.nix"
+
 if [[ ! -x "$MAT" ]]; then
   "$CHMOD" +x "$MAT" 2>/dev/null || true
 fi
@@ -53,6 +58,7 @@ echo "-- materialize copies module to /tmp and returns path --"
 MAT_OUT=""
 run_capture env \
   NIX_SCOUT_PARENT="$NIX_SCOUT_PARENT" \
+  NIX_SCOUT_SETTINGS_DIR="$RESOLVED_SETTINGS" \
   WORKDIR="$WORKDIR" \
   bash "$MAT" "$TEST_MOD"
 if [[ "$CAPTURED_RC" -eq 0 && -n "$CAPTURED_OUT" ]]; then
@@ -67,6 +73,16 @@ else
     fail "materialize-module.sh failed (rc=$CAPTURED_RC err=$(printf %q "$CAPTURED_ERR") out=$(printf %q "$CAPTURED_OUT"))"
     finish_suite
   fi
+fi
+
+
+echo "-- materialize carries resolved Nix settings into scout context --"
+if [[ -f "$MAT_OUT/scout-settings.nix" ]] \
+  && "$GREP" -q 'settings = import ./scout-settings.nix' "$MAT_OUT/scout-context.nix" \
+  && "$GREP" -q 'homeManager' "$MAT_OUT/scout-settings.nix"; then
+  pass "materialized context imports resolved settings as Nix"
+else
+  fail "materialize must copy resolved Nix settings into scout context"
 fi
 
 if [[ -z "$MAT_OUT" ]]; then
@@ -139,6 +155,26 @@ if [[ -f "$MAT_OUT/scout-context.nix" ]] && "$GREP" -q 'systemRebuild = false' "
   pass "materialize-module.sh seeds scout-context.nix with systemRebuild=false"
 else
   fail "materialized module missing scout-context.nix with systemRebuild=false"
+fi
+
+echo "-- scout context includes version, mode, and invoking user --"
+if "$GREP" -q 'version = 1' "$MAT_OUT/scout-context.nix" \
+  && "$GREP" -q 'mode = "switch"' "$MAT_OUT/scout-context.nix" \
+  && "$GREP" -q 'user = {' "$MAT_OUT/scout-context.nix" \
+  && "$GREP" -q "name = \"${USER}\"" "$MAT_OUT/scout-context.nix" \
+  && "$GREP" -q "homeDirectory = \"${HOME}\"" "$MAT_OUT/scout-context.nix"; then
+  pass "scout-context.nix records switch mode and invoking user identity"
+else
+  fail "scout-context.nix must record version=1, mode=switch, USER, and HOME"
+fi
+
+if "$GREP" -B6 -A2 'bash.*materialize-module.sh' "$REPO/bin/nix-scout" \
+  | "$GREP" -q 'NIX_SCOUT_USER=' \
+  && "$GREP" -B6 -A2 'bash.*materialize-module.sh' "$REPO/bin/nix-scout" \
+  | "$GREP" -q 'NIX_SCOUT_HOME='; then
+  pass "CLI passes resolved user identity to materialization"
+else
+  fail "CLI must pass _SCOUT_USER and _SCOUT_HOME to materialize-module.sh"
 fi
 
 echo "-- CLI build leaves systemRebuild at default false --"

@@ -138,7 +138,16 @@ let
       let
         m = import (evalModulesDir + "/${name}/flake.nix");
       in
-        m.outputs (inputs // { nix-scout = nixScout; systemRebuild = true; })
+        m.outputs (inputs // {
+          nix-scout = nixScout;
+          systemRebuild = true;
+          scoutContext = {
+            version = 1;
+            mode = "rebuild";
+            systemRebuild = true;
+            settings = moduleSettings.${name}.settings or { };
+          };
+        })
     ) scoutDirs;
 
   # Modules exporting `baseline` — a NixOS module, imported directly so it can set
@@ -147,6 +156,46 @@ let
   baselineModules = lib.mapAttrsToList (_: out: out.baseline) (
     lib.filterAttrs (_: out: out ? baseline) scoutOutputs
   );
+
+  # Home Manager baselines keep the non-file configuration produced by an
+  # adapted Home Manager module. The adapter disables only the home.file
+  # entries it exported through packages.<system>.scout.
+  homeBaselineModules = lib.mapAttrsToList (_: out: out.homeBaseline) (
+    lib.filterAttrs (_: out: out ? homeBaseline) scoutOutputs
+  );
+
+  # Evaluate each module's existing settings.nix once against the real host
+  # configuration. Flakelet consumes this same Nix source directly. The
+  # rendered Nix values below let a later standalone scout build use the
+  # matching Home Manager overrides through scout-context.nix.
+  moduleSettings = lib.mapAttrs
+    (name: _:
+      let
+        settingsFile = evalModulesDir + "/${name}/settings.nix";
+        raw = if builtins.pathExists settingsFile then import settingsFile else { };
+      in
+      if builtins.pathExists settingsFile
+      then if builtins.isFunction raw
+      then raw { inherit config lib pkgs; }
+      else raw
+      else { }
+    )
+    scoutDirs;
+
+  # Persist the settings as Nix. Convert derivations and paths to their string
+  # forms first so the saved expression does not depend on evaluator objects.
+  settingsToNixValue = value:
+    if lib.isDerivation value || builtins.isPath value then toString value
+    else if builtins.isAttrs value then lib.mapAttrs (_: settingsToNixValue) value
+    else if builtins.isList value then map settingsToNixValue value
+    else value;
+
+  resolvedSettingsFiles = lib.mapAttrs
+    (name: meta:
+      pkgs.writeText "nix-scout-settings-${name}.nix"
+        (lib.generators.toPretty { } (settingsToNixValue (meta.settings or { })))
+    )
+    moduleSettings;
 
   # Modules exposing packages.<system>.scout — prebuilt into systemPackages
   # below, and (when the derivation carries a home-files/ subdirectory)
@@ -170,25 +219,29 @@ let
 
   # Import settings.nix for each module that exports flakelets and build the
   # services.flakelets.services attrset.  Missing settings.nix is a hard error.
-  flakeletServices = lib.foldlAttrs (acc: name: out:
-    if !(out ? flakelets) then acc
-    else
-      let
-        settingsFile = evalModulesDir + "/${name}/settings.nix";
-        meta = if builtins.pathExists settingsFile
-          then import settingsFile { inherit config lib; }
-          else throw "nix-scout: scout-module '${name}' exports flakelets but has no settings.nix — add settings.nix with { enable, output?, settings, autoUpdate? }";
-      in
-      acc // lib.optionalAttrs meta.enable {
-        ${name} = {
-          flake  = "path:${runtimeModulesDir}/${name}";
-          output = meta.output or "flakelets.default";
-          settings = meta.settings or {};
-        } // lib.optionalAttrs (meta ? autoUpdate) {
-          autoUpdate = meta.autoUpdate;
-        };
-      }
-  ) {} scoutOutputs;
+  flakeletServices = lib.foldlAttrs
+    (acc: name: out:
+      if !(out ? flakelets) then acc
+      else
+        let
+          settingsFile = evalModulesDir + "/${name}/settings.nix";
+          meta =
+            if builtins.pathExists settingsFile
+            then moduleSettings.${name}
+            else throw "nix-scout: scout-module '${name}' exports flakelets but has no settings.nix — add settings.nix with { enable, output?, settings, autoUpdate? }";
+        in
+        acc // lib.optionalAttrs meta.enable {
+          ${name} = {
+            flake = "path:${runtimeModulesDir}/${name}";
+            output = meta.output or "flakelets.default";
+            settings = meta.settings or { };
+          } // lib.optionalAttrs (meta ? autoUpdate) {
+            autoUpdate = meta.autoUpdate;
+          };
+        }
+    )
+    { }
+    scoutOutputs;
 
   normalUserNames = lib.attrNames (lib.filterAttrs (_: u: u.isNormalUser) config.users.users);
 
@@ -211,7 +264,7 @@ in
     services = flakeletServices;
   };
 
-  home-manager.sharedModules = lib.mkForce [
+  home-manager.sharedModules = lib.mkBefore ([
     ({ config, lib, ... }:
       let
         # Per-file removal policies for files hm-activate-files.sh copied into
@@ -243,41 +296,43 @@ in
           '';
         };
 
-        home.sessionPath = [ (scoutBin config.home.username) ];
-        home.sessionVariables = {
-          # "$VAR" is fine in "..." — Nix only interpolates ${...}. Use \${VAR} for braces.
-          XDG_DATA_DIRS = "${scoutShare config.home.username}:$XDG_DATA_DIRS";
-          MANPATH = "${scoutMan config.home.username}:$MANPATH";
+        config = {
+          home.sessionPath = [ (scoutBin config.home.username) ];
+          home.sessionVariables = {
+            # "$VAR" is fine in "..." — Nix only interpolates ${...}. Use \${VAR} for braces.
+            XDG_DATA_DIRS = "${scoutShare config.home.username}:$XDG_DATA_DIRS";
+            MANPATH = "${scoutMan config.home.username}:$MANPATH";
+          };
+          programs.fish.interactiveShellInit = lib.mkAfter ''
+            fish_add_path -m ${scoutBin config.home.username}
+          '';
+          programs.bash.initExtra = lib.mkAfter ''
+            [[ -f "''${XDG_CONFIG_HOME:-''$HOME/.config}/bash/nix-scout.bash" ]] && \
+              source "''${XDG_CONFIG_HOME:-''$HOME/.config}/bash/nix-scout.bash"
+          '';
+          programs.zsh.initExtra = lib.mkAfter ''
+            [[ -f "''${XDG_CONFIG_HOME:-''$HOME/.config}/zsh/nix-scout.zsh" ]] && \
+              source "''${XDG_CONFIG_HOME:-''$HOME/.config}/zsh/nix-scout.zsh"
+          '';
+
+          home.activation.checkLinkTargets = lib.mkForce (
+            lib.hm.dag.entryBefore [ "writeBoundary" ] ''
+              :
+            ''
+          );
+
+          home.activation.linkGeneration = lib.mkForce (
+            lib.hm.dag.entryAfter [ "writeBoundary" ] ''
+              ${pkgs.coreutils}/bin/env \
+                "newGenPath=$newGenPath" \
+                "oldGenPath=''${oldGenPath:-}" \
+                "NIX_SCOUT_HM_POLICIES_FILE=${hmHomeFilePoliciesFile}" \
+                ${lib.getExe pkgs.bash} ${nixScoutPkg}/lib/hm-activate-files.sh
+            ''
+          );
         };
-        programs.fish.interactiveShellInit = lib.mkAfter ''
-          fish_add_path -m ${scoutBin config.home.username}
-        '';
-        programs.bash.initExtra = lib.mkAfter ''
-          [[ -f "''${XDG_CONFIG_HOME:-''$HOME/.config}/bash/nix-scout.bash" ]] && \
-            source "''${XDG_CONFIG_HOME:-''$HOME/.config}/bash/nix-scout.bash"
-        '';
-        programs.zsh.initExtra = lib.mkAfter ''
-          [[ -f "''${XDG_CONFIG_HOME:-''$HOME/.config}/zsh/nix-scout.zsh" ]] && \
-            source "''${XDG_CONFIG_HOME:-''$HOME/.config}/zsh/nix-scout.zsh"
-        '';
-
-        home.activation.checkLinkTargets = lib.mkForce (
-          lib.hm.dag.entryBefore [ "writeBoundary" ] ''
-            :
-          ''
-        );
-
-        home.activation.linkGeneration = lib.mkForce (
-          lib.hm.dag.entryAfter [ "writeBoundary" ] ''
-            ${pkgs.coreutils}/bin/env \
-              "newGenPath=$newGenPath" \
-              "oldGenPath=''${oldGenPath:-}" \
-              "NIX_SCOUT_HM_POLICIES_FILE=${hmHomeFilePoliciesFile}" \
-              ${lib.getExe pkgs.bash} ${nixScoutPkg}/lib/hm-activate-files.sh
-          ''
-        );
     })
-  ];
+  ] ++ homeBaselineModules);
 
   system.activationScripts.nix-scout-config = {
     text = ''
@@ -288,6 +343,17 @@ in
       EOF
       chmod 644 /var/lib/nix-scout/paths
     '';
+  };
+
+  system.activationScripts.nix-scout-settings = {
+    text = ''
+      install -d -m755 /var/lib/nix-scout/settings
+      find /var/lib/nix-scout/settings -mindepth 1 -maxdepth 1 -type f -name '*.nix' -delete
+      ${lib.concatStrings (lib.mapAttrsToList (name: file: ''
+        install -m644 ${file} /var/lib/nix-scout/settings/${name}.nix
+      '') resolvedSettingsFiles)}
+    '';
+    deps = [ "nix-scout-config" ];
   };
 
   # The `home` facet used to only land on disk via an explicit

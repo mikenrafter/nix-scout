@@ -71,6 +71,7 @@ nix-scout — scout module switcher
 
 Usage:
   nix-scout list                        List scout modules and their facets
+  nix-scout inspect <name>              Evaluate and explain one scout module
   nix-scout new <name> [FACET...]       Scaffold a scout module (facets: scout home baseline flakelet)
   nix-scout switch <name> [NIX-FLAGS]   Materialize, build, and apply a scout module
   nix-scout switch <path>               Install a store path or flake installable into profile
@@ -129,8 +130,8 @@ Environment (paths file: $NIX_SCOUT_PATHS_FILE — written by the nix-scout NixO
   NIX_SCOUT_GCROOTS   $NIX_SCOUT_GCROOTS
 
 Rebuild prebuild passes systemRebuild=true into module outputs; 'switch' materializes
-scout-context.nix with systemRebuild=false. Modules read mode via nix-scout.lib.readSystemRebuild
-or by importing ./scout-context.nix (see lib/scout-module.nix).
+scout-context.nix with the switch mode, invoking user, home directory, and resolved Nix
+settings. Modules read it via nix-scout.lib.readContext (see lib/scout-module.nix).
 
 module-mode: scout/home/flakelet facets cannot set system-wide NixOS options
 (use core config, or the 'baseline' facet, for that).
@@ -160,7 +161,7 @@ _facet_tags() {
     tags="${tags:+${tags} }flakelet"
   fi
   # baseline: purely informational tag — nix-scout switch never acts on this facet.
-  if grep -qE '[^#]*baseline[[:space:]]*=' "$flake" 2>/dev/null; then
+  if grep -qE '[^#]*(baseline|homeBaseline)[[:space:]]*=' "$flake" 2>/dev/null; then
     tags="${tags:+${tags} }baseline"
   fi
   printf '%s' "${tags:-unknown}"
@@ -193,6 +194,114 @@ cmd_list() {
     tags="$(_facet_tags "$dir")"
     printf '%-20s  [%s]\n' "$name" "$tags"
   done | sort
+}
+
+cmd_inspect() {
+  local name="${1:-}"
+  if [[ -z "$name" ]]; then
+    echo "nix-scout inspect: missing module name" >&2
+    exit 1
+  fi
+
+  local modules mod_dir inspect_dir flake tags settings_file adapter_json
+  modules="$(_resolve_modules)"
+  mod_dir="$modules/$name"
+  flake="$mod_dir/flake.nix"
+  settings_file="$mod_dir/settings.nix"
+
+  if [[ ! -f "$flake" ]]; then
+    echo "nix-scout: module not found: $name (expected $flake)" >&2
+    exit 1
+  fi
+
+  tags="$(_facet_tags "$mod_dir")"
+  printf 'Module: %s\n' "$name"
+  printf 'Path: %s\n' "$mod_dir"
+  printf 'Facets: %s\n' "$tags"
+
+  if [[ -f "$settings_file" ]]; then
+    printf 'Settings: %s (Nix, consumed by flakelet)\n' "$settings_file"
+  else
+    printf 'Settings: none\n'
+  fi
+
+  if grep -q 'nixosModule\.flakelet' "$flake" 2>/dev/null; then
+    printf 'Adapter: NixOS module to flakelet\n'
+  fi
+  if grep -q 'homeManagerModule\.scout' "$flake" 2>/dev/null; then
+    printf 'Adapter: Home Manager module to home-files\n'
+  fi
+  if grep -q 'homeBaseline' "$flake" 2>/dev/null; then
+    printf 'Rebuild-only: Home Manager baseline present\n'
+  fi
+  if grep -qE '[^#]*baseline[[:space:]]*=' "$flake" 2>/dev/null; then
+    printf 'Rebuild-only: NixOS baseline present\n'
+  fi
+
+  inspect_dir="$(env \
+    NIX_SCOUT_PARENT="$(_resolve_parent)" \
+    NIX_SCOUT_USER="$_SCOUT_USER" \
+    NIX_SCOUT_HOME="$_SCOUT_HOME" \
+    bash "$(_scout_lib materialize-module.sh)" "$mod_dir" 2>/dev/null)"
+  inspect_dir="${inspect_dir%%$'\n'*}"
+
+  if ! nix flake show --json --no-write-lock-file "$inspect_dir" >/dev/null 2>&1; then
+    echo "Evaluation: failed (run nix flake show --show-trace $mod_dir)" >&2
+    rm -rf -- "$inspect_dir"
+    return 1
+  fi
+  printf 'Evaluation: ok\n'
+
+  if grep -q 'nixosModule\.flakelet' "$flake" 2>/dev/null; then
+    if adapter_json="$(env NIX_SCOUT_INSPECT_MODULE="$inspect_dir" nix eval \
+      --impure --json --expr '
+        let
+          f = builtins.getFlake ("path:" + builtins.getEnv "NIX_SCOUT_INSPECT_MODULE");
+          definition = f.flakelets.default { types.attrs = null; };
+        in definition.nixScoutInspect
+      ' 2>/dev/null)"; then
+      printf 'Flakelet units:\n'
+      jq -r '.units[] | "  " + .' <<<"$adapter_json"
+      printf 'Baseline unit masks:\n'
+      jq -r '.masks | to_entries[] | .key as $kind | .value[] | "  " + $kind + "." + .' \
+        <<<"$adapter_json"
+    else
+      echo "Adapter inspection: failed (rerun with nix flake show --show-trace $mod_dir)" >&2
+      rm -rf -- "$inspect_dir"
+      return 1
+    fi
+  fi
+
+  if grep -q 'homeManagerModule\.scout' "$flake" 2>/dev/null; then
+    if adapter_json="$(env NIX_SCOUT_INSPECT_MODULE="$inspect_dir" nix eval \
+      --impure --json --expr '
+        let
+          f = builtins.getFlake ("path:" + builtins.getEnv "NIX_SCOUT_INSPECT_MODULE");
+          scout = f.packages.${builtins.currentSystem}.scout;
+        in scout.nixScoutInspect
+      ' 2>/dev/null)"; then
+      printf 'Home files:\n'
+      jq -r '.files[] | "  " + .' <<<"$adapter_json"
+      printf 'Baseline file masks:\n'
+      jq -r '.masks[] | "  " + .' <<<"$adapter_json"
+    else
+      echo "Adapter inspection: failed (rerun with nix flake show --show-trace $mod_dir)" >&2
+      rm -rf -- "$inspect_dir"
+      return 1
+    fi
+  fi
+
+  if [[ -f /etc/flakelet/config.json ]] \
+    && jq -e --arg name "$name" '.services[$name]' /etc/flakelet/config.json >/dev/null 2>&1; then
+    printf 'Resolved flakelet setting paths:\n'
+    jq -r --arg name "$name" '
+      .services[$name].settings // {}
+      | paths(scalars)
+      | "  " + (map(tostring) | join("."))
+    ' /etc/flakelet/config.json 2>/dev/null || true
+  fi
+
+  rm -rf -- "$inspect_dir"
 }
 
 cmd_update() {
@@ -258,7 +367,11 @@ _switch_module() {
   fi
 
   echo "nix-scout: materialize $name from $mod_dir" >&2
-  mat="$(env NIX_SCOUT_PARENT="$(_resolve_parent)" bash "$(_scout_lib materialize-module.sh)" "$mod_dir")"
+  mat="$(env \
+    NIX_SCOUT_PARENT="$(_resolve_parent)" \
+    NIX_SCOUT_USER="$_SCOUT_USER" \
+    NIX_SCOUT_HOME="$_SCOUT_HOME" \
+    bash "$(_scout_lib materialize-module.sh)" "$mod_dir")"
   mat="${mat%%$'\n'*}"
 
   if [[ "$has_pkg" == "true" ]]; then
@@ -343,7 +456,8 @@ cmd_switch() {
     return
   fi
 
-  local modules="$(_resolve_modules)"
+  local modules
+  modules="$(_resolve_modules)"
   if [[ -f "$modules/$arg/flake.nix" ]]; then
     _switch_module "$arg" "${nix_extra[@]}"
     return
@@ -523,7 +637,7 @@ cmd_completions() {
 complete -c nix-scout -f
 
 function __nix_scout_needs_subcommand
-    not __fish_seen_subcommand_from list new switch update status clear doctor completions help --help -h
+    not __fish_seen_subcommand_from list inspect new switch update status clear doctor completions help --help -h
 end
 
 function __nix_scout_module_completions
@@ -536,6 +650,7 @@ function __nix_scout_new_facets
 end
 
 complete -c nix-scout -n __nix_scout_needs_subcommand -a list        -d 'List scout modules'
+complete -c nix-scout -n __nix_scout_needs_subcommand -a inspect     -d 'Evaluate and explain a scout module'
 complete -c nix-scout -n __nix_scout_needs_subcommand -a new         -d 'Scaffold a scout module'
 complete -c nix-scout -n __nix_scout_needs_subcommand -a switch      -d 'Materialize, build, and apply a scout module'
 complete -c nix-scout -n __nix_scout_needs_subcommand -a update      -d "Sync a module's flake.lock with its declared inputs"
@@ -546,6 +661,9 @@ complete -c nix-scout -n __nix_scout_needs_subcommand -a completions -d 'Print s
 complete -c nix-scout -n __nix_scout_needs_subcommand -a help        -d 'Show usage'
 
 complete -c nix-scout -n '__fish_seen_subcommand_from switch' \
+    -a '(__nix_scout_module_completions)' -d 'Scout module'
+
+complete -c nix-scout -n '__fish_seen_subcommand_from inspect' \
     -a '(__nix_scout_module_completions)' -d 'Scout module'
 
 complete -c nix-scout -n '__fish_seen_subcommand_from update' \
@@ -572,12 +690,12 @@ _nix_scout() {
     _init_completion -n : || return
 
     if [[ $cword -eq 1 ]]; then
-        COMPREPLY=($(compgen -W 'list new switch update status clear doctor completions help' -- "$cur"))
+        COMPREPLY=($(compgen -W 'list inspect new switch update status clear doctor completions help' -- "$cur"))
         return
     fi
 
     case ${words[1]} in
-        switch)
+        switch|inspect)
             [[ $cword -eq 2 ]] || return
             COMPREPLY=($(compgen -W "$(_nix_scout_modules)" -- "$cur"))
             ;;
@@ -618,6 +736,7 @@ _nix_scout() {
             local -a commands
             commands=(
                 'list:List scout modules'
+                'inspect:Evaluate and explain a scout module'
                 'new:Scaffold a scout module'
                 'switch:Materialize, build, and apply a scout module'
                 'update:Sync a module'"'"'s flake.lock with its declared inputs'
@@ -631,7 +750,7 @@ _nix_scout() {
             ;;
         args)
             case $words[1] in
-                switch)
+                switch|inspect)
                     local -a modules
                     modules=(${${(f)"$(nix-scout list 2>/dev/null | awk '{print $1}')"}:#})
                     _describe -t modules 'scout module' modules
@@ -672,6 +791,11 @@ case "${1:-}" in
   list)
     _require_user
     cmd_list
+    ;;
+  inspect)
+    _require_user
+    shift
+    cmd_inspect "$@"
     ;;
   new)
     _require_user
