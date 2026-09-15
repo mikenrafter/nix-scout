@@ -130,8 +130,8 @@ let
 
   # Dual-entrypoint coexistence: sharedConfig is what a NixOS module would
   # inject via sharedModules; wrapper imports it (like homeModules.niri).
-  # homeBaseline excludes the wrapper so sharedConfig is not declared twice.
-  # A separate consumer module stays in homeBaseline.imports.
+  # homeBaselineModules lists only the consumer — scout/inspect still use
+  # the full modules list (wrapper + consumer) for harvest and masks.
   sharedConfigModule = { lib, ... }: {
     options.programs.dual.message = lib.mkOption {
       type = lib.types.str;
@@ -150,7 +150,7 @@ let
   dualSource = {
     inherit home-manager nixpkgs system;
     modules = [ wrapperModule consumerModule ];
-    excludeFromHomeBaseline = [ wrapperModule ];
+    homeBaselineModules = [ consumerModule ];
     homeStateVersion = "26.05";
     context.user = {
       name = "fixture";
@@ -159,7 +159,7 @@ let
   };
   dualInfo = adapters.homeManagerModule.inspect dualSource { };
   # Rebuild path: sharedConfig already present (NixOS injection), plus
-  # homeBaseline that skips wrapperModule and keeps consumerModule.
+  # homeBaseline that imports only consumerModule.
   dualBaseline = home-manager.lib.homeManagerConfiguration {
     inherit pkgs;
     modules = [
@@ -172,21 +172,21 @@ let
       }
     ];
   };
-  dualWithoutExclude = builtins.tryEval (
-    home-manager.lib.homeManagerConfiguration {
+  # Without homeBaselineModules, baseline re-imports the wrapper and
+  # double-declares sharedConfig's options against the NixOS injection.
+  dualWithoutSplit = builtins.tryEval (
+    (home-manager.lib.homeManagerConfiguration {
       inherit pkgs;
       modules = [
         sharedConfigModule
-        (adapters.homeManagerModule.baseline (dualSource // {
-          excludeFromHomeBaseline = [ ];
-        }))
+        (adapters.homeManagerModule.baseline (builtins.removeAttrs dualSource [ "homeBaselineModules" ]))
         {
           home.username = "fixture";
           home.homeDirectory = "/home/fixture";
           home.stateVersion = "26.05";
         }
       ];
-    }
+    }).config.home.file.".config/dual/from-consumer".enable
   );
 in
 assert builtins.elem "adapter-fixture.service" nixosInfo.units;
@@ -214,5 +214,5 @@ assert builtins.elem ".config/dual/from-consumer" dualInfo.files;
 assert dualBaseline.config.home.file.".config/dual/from-shared".enable == false;
 assert dualBaseline.config.home.file.".config/dual/from-wrapper".enable == false;
 assert dualBaseline.config.home.file.".config/dual/from-consumer".enable == false;
-assert dualWithoutExclude.success == false;
+assert dualWithoutSplit.success == false;
 pkgs.writeText "nix-scout-module-adapters-pass" "pass\n"

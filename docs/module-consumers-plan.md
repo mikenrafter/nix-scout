@@ -138,9 +138,11 @@ also imports it). Listing both in `source.modules` is correct for
 scout/inspect, but `homeBaseline` must not re-import the wrapper or options
 are declared twice.
 
-Set `source.excludeFromHomeBaseline` to the module values that the NixOS side
-already supplies. Harvest and masks still use the full `modules` list;
-`homeBaseline.imports` drops only the excluded entries.
+Set `source.homeBaselineModules` to the modules that should be imported at
+rebuild time (typically everything in `modules` except the wrapper the NixOS
+side already covers). Harvest and masks still use the full `modules` list.
+Do not try to exclude by module reference — Nix function equality is always
+false, so `builtins.elem` cannot filter lambdas.
 
 ## Scout context
 

@@ -220,9 +220,11 @@ steps.
 
 When a co-imported NixOS module already injects the same Home Manager module
 into `home-manager.sharedModules` (niri-flake's `nixosModules.niri` injects
-`homeModules.config`), list the redundant HM entry on
-`excludeFromHomeBaseline` so rebuild imports skip it while scout/inspect still
-evaluate the full `modules` list for harvest and masks:
+`homeModules.config`), set `homeBaselineModules` to the subset that should
+actually be imported at rebuild time. Scout/inspect still evaluate the full
+`modules` list for harvest and masks. (An exclude-by-reference list cannot
+work: Home Manager modules are lambdas, and Nix function equality is always
+false.)
 
 ```nix
 source = {
@@ -231,8 +233,8 @@ source = {
     ./niri-config.nix
   ];
   # homeModules.niri imports homeModules.config; nixosModules.niri already
-  # injects that same module via sharedModules — exclude the wrapper.
-  excludeFromHomeBaseline = [ niri-flake.homeModules.niri ];
+  # injects that same module via sharedModules — import only the rest.
+  homeBaselineModules = [ ./niri-config.nix ];
   # ...
 };
 homeBaseline = nix-scout.lib.homeManagerModule.baseline source;

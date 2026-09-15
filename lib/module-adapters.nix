@@ -258,12 +258,12 @@ in
       '';
 
     # `source.modules` is the full list for scout/inspect/masks.
-    # `source.excludeFromHomeBaseline` lists module values to omit from
-    # homeBaseline.imports only — for cases where a co-imported NixOS module
-    # already injects the same HM module into home-manager.sharedModules
-    # (niri-flake.nixosModules.niri → homeModules.config). Those modules are
-    # still evaluated for harvest; re-importing them at rebuild time would
-    # double-declare options.
+    # `source.homeBaselineModules`, when set, replaces that list for
+    # homeBaseline.imports only — for dual NixOS+HM entrypoints where a
+    # co-imported NixOS module already injects part of `modules` into
+    # home-manager.sharedModules (niri-flake.nixosModules.niri →
+    # homeModules.config). Module values are lambdas; Nix function equality
+    # is always false, so an exclude-by-reference list cannot work.
     baseline = source: args@{ lib, ... }:
       let
         settingsArgs = args // {
@@ -271,12 +271,9 @@ in
         };
         overrides = sourceSettings "homeManager" source settingsArgs;
         inspection = homeInspection source overrides;
-        excluded = source.excludeFromHomeBaseline or [ ];
       in
       {
-        imports = builtins.filter
-          (m: !(builtins.elem m excluded))
-          (sourceModules source);
+        imports = source.homeBaselineModules or (sourceModules source);
         config = lib.mkMerge [
           (mergeConfig lib source overrides)
           {
