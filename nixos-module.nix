@@ -411,6 +411,35 @@ in
     deps = [ "users" "nix-scout-dirs" ];
   };
 
+  # flakelet's own eval_user is permission-walled (setuid/setgid, no
+  # initgroups — see flakelet-access.sh) from writing a path: module's own
+  # flake.lock. That's fine for modules with no declared inputs, but a
+  # module that gains real inputs needs its lock kept current some other
+  # way, or flakelet's own scheduled `update` (when a module opts into
+  # autoUpdate) hits the exact wall it's structurally unable to cross and
+  # fails every time it fires. `nix-scout update` is a straight copy from
+  # the host's own already-resolved flake.lock, not an independent
+  # re-resolution — running it here doesn't undermine flakelet's sandboxing,
+  # it just keeps the copy current without a manual step. Runs as whoever
+  # owns the parent repo so the rewritten locks keep that ownership; skips
+  # cleanly if that can't be determined. Non-fatal per rebuild: a module
+  # still out of sync after this hits the moduleMissingInputs/
+  # moduleDummyNodes eval-time error above on the *next* rebuild, same as
+  # if this script didn't exist at all.
+  system.activationScripts.nix-scout-update-locks = {
+    text = ''
+      parent_owner="$(${pkgs.coreutils}/bin/stat -c '%U' ${lib.escapeShellArg parent} 2>/dev/null || true)"
+      if [[ -n "$parent_owner" && "$parent_owner" != "root" ]]; then
+        parent_home="$(${pkgs.coreutils}/bin/getent passwd "$parent_owner" | ${pkgs.coreutils}/bin/cut -d: -f6)"
+        ${pkgs.util-linux}/bin/runuser -u "$parent_owner" -- \
+          ${pkgs.coreutils}/bin/env HOME="$parent_home" \
+            ${nixScoutPkg}/bin/nix-scout update all \
+        || echo "nix-scout: update all failed (non-fatal)" >&2
+      fi
+    '';
+    deps = [ "users" "nix-scout-config" ];
+  };
+
   # Flakelet evaluates path: flakes as eval_user via setuid/setgid without
   # initgroups — supplementary groups (e.g. users) are ineffective. Walk the
   # modules tree and grant other-x / other-rx so primary-gid-only credentials
