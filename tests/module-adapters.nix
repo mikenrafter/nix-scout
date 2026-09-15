@@ -127,6 +127,67 @@ let
     ];
   };
   homeScout = adapters.homeManagerModule.scout homeSource;
+
+  # Dual-entrypoint coexistence: sharedConfig is what a NixOS module would
+  # inject via sharedModules; wrapper imports it (like homeModules.niri).
+  # homeBaseline excludes the wrapper so sharedConfig is not declared twice.
+  # A separate consumer module stays in homeBaseline.imports.
+  sharedConfigModule = { lib, ... }: {
+    options.programs.dual.message = lib.mkOption {
+      type = lib.types.str;
+      default = "shared";
+    };
+    config.home.file.".config/dual/from-shared".text = "shared";
+  };
+  wrapperModule = { lib, ... }: {
+    imports = [ sharedConfigModule ];
+    options.programs.dual.enable = lib.mkEnableOption "dual";
+    config.home.file.".config/dual/from-wrapper".text = "wrapper";
+  };
+  consumerModule = { lib, ... }: {
+    config.home.file.".config/dual/from-consumer".text = "consumer";
+  };
+  dualSource = {
+    inherit home-manager nixpkgs system;
+    modules = [ wrapperModule consumerModule ];
+    excludeFromHomeBaseline = [ wrapperModule ];
+    homeStateVersion = "26.05";
+    context.user = {
+      name = "fixture";
+      homeDirectory = "/home/fixture";
+    };
+  };
+  dualInfo = adapters.homeManagerModule.inspect dualSource { };
+  # Rebuild path: sharedConfig already present (NixOS injection), plus
+  # homeBaseline that skips wrapperModule and keeps consumerModule.
+  dualBaseline = home-manager.lib.homeManagerConfiguration {
+    inherit pkgs;
+    modules = [
+      sharedConfigModule
+      (adapters.homeManagerModule.baseline dualSource)
+      {
+        home.username = "fixture";
+        home.homeDirectory = "/home/fixture";
+        home.stateVersion = "26.05";
+      }
+    ];
+  };
+  dualWithoutExclude = builtins.tryEval (
+    home-manager.lib.homeManagerConfiguration {
+      inherit pkgs;
+      modules = [
+        sharedConfigModule
+        (adapters.homeManagerModule.baseline (dualSource // {
+          excludeFromHomeBaseline = [ ];
+        }))
+        {
+          home.username = "fixture";
+          home.homeDirectory = "/home/fixture";
+          home.stateVersion = "26.05";
+        }
+      ];
+    }
+  );
 in
 assert builtins.elem "adapter-fixture.service" nixosInfo.units;
 assert builtins.elem "adapter-fixture" nixosInfo.masks.services;
@@ -147,4 +208,11 @@ assert builtins.any
   (builtins.attrValues homeBaseline.config.home.file);
 assert builtins.readFile "${homeScout}/home-files/.config/adapter/message" == "from-settings";
 assert homeScout.nixScoutInspect.masks == [ ".config/adapter/message" ];
+assert builtins.elem ".config/dual/from-shared" dualInfo.files;
+assert builtins.elem ".config/dual/from-wrapper" dualInfo.files;
+assert builtins.elem ".config/dual/from-consumer" dualInfo.files;
+assert dualBaseline.config.home.file.".config/dual/from-shared".enable == false;
+assert dualBaseline.config.home.file.".config/dual/from-wrapper".enable == false;
+assert dualBaseline.config.home.file.".config/dual/from-consumer".enable == false;
+assert dualWithoutExclude.success == false;
 pkgs.writeText "nix-scout-module-adapters-pass" "pass\n"

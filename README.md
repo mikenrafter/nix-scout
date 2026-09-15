@@ -218,6 +218,26 @@ those extracted files. User systemd units remain rebuild-only because a plain
 home-file copy cannot safely reproduce Home Manager's reload and enablement
 steps.
 
+When a co-imported NixOS module already injects the same Home Manager module
+into `home-manager.sharedModules` (niri-flake's `nixosModules.niri` injects
+`homeModules.config`), list the redundant HM entry on
+`excludeFromHomeBaseline` so rebuild imports skip it while scout/inspect still
+evaluate the full `modules` list for harvest and masks:
+
+```nix
+source = {
+  modules = [
+    niri-flake.homeModules.niri
+    ./niri-config.nix
+  ];
+  # homeModules.niri imports homeModules.config; nixosModules.niri already
+  # injects that same module via sharedModules — exclude the wrapper.
+  excludeFromHomeBaseline = [ niri-flake.homeModules.niri ];
+  # ...
+};
+homeBaseline = nix-scout.lib.homeManagerModule.baseline source;
+```
+
 `settings.nix` remains a Nix file and is still consumed directly by flakelet.
 During a rebuild, nix-scout resolves the `settings` attrset against the host
 configuration. It passes that attrset to scout package evaluation and writes it

@@ -129,6 +129,19 @@ Import the original module during a normal rebuild, but disable only the entries
 
 Packages, users, groups, firewall rules, environment configuration, activation entries, and other support configuration remain active. The masks must never affect definitions contributed by unrelated host modules.
 
+### Dual NixOS + Home Manager entrypoints
+
+Some upstream flakes expose both a NixOS module and a Home Manager module that
+each import the same options file (niri-flake: `nixosModules.niri` injects
+`homeModules.config` into `home-manager.sharedModules`; `homeModules.niri`
+also imports it). Listing both in `source.modules` is correct for
+scout/inspect, but `homeBaseline` must not re-import the wrapper or options
+are declared twice.
+
+Set `source.excludeFromHomeBaseline` to the module values that the NixOS side
+already supplies. Harvest and masks still use the full `modules` list;
+`homeBaseline.imports` drops only the excluded entries.
+
 ## Scout context
 
 `scout-context.nix` is a temporary sidecar created in the materialized module directory by `nix-scout switch`. Rebuild evaluation passes the same versioned context directly to the scout module's `outputs` function with `systemRebuild = true` and the host-resolved settings. It does not create the file. Flakelet evaluates the live module directory and does not use this file.

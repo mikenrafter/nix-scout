@@ -257,6 +257,13 @@ in
         cp -aL ${inspection.evaluated.activationPackage}/home-files/. "$out/home-files/"
       '';
 
+    # `source.modules` is the full list for scout/inspect/masks.
+    # `source.excludeFromHomeBaseline` lists module values to omit from
+    # homeBaseline.imports only — for cases where a co-imported NixOS module
+    # already injects the same HM module into home-manager.sharedModules
+    # (niri-flake.nixosModules.niri → homeModules.config). Those modules are
+    # still evaluated for harvest; re-importing them at rebuild time would
+    # double-declare options.
     baseline = source: args@{ lib, ... }:
       let
         settingsArgs = args // {
@@ -264,9 +271,12 @@ in
         };
         overrides = sourceSettings "homeManager" source settingsArgs;
         inspection = homeInspection source overrides;
+        excluded = source.excludeFromHomeBaseline or [ ];
       in
       {
-        imports = sourceModules source;
+        imports = builtins.filter
+          (m: !(builtins.elem m excluded))
+          (sourceModules source);
         config = lib.mkMerge [
           (mergeConfig lib source overrides)
           {
