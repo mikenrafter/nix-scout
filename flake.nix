@@ -58,6 +58,15 @@
       installPhase = ''
         runHook preInstall
         install -Dm755 $src/bin/nix-scout                $out/bin/nix-scout
+        patchShebangs $out/bin/nix-scout
+        wrapProgram $out/bin/nix-scout --prefix PATH : ${pkgs.lib.makeBinPath [
+          pkgs.bash
+          pkgs.coreutils
+          pkgs.findutils
+          pkgs.gnugrep
+          pkgs.nix
+          pkgs.getent
+        ]}
         install -Dm755 $src/lib/materialize-module.sh  $out/lib/materialize-module.sh
         install -Dm644 $src/lib/scout-lib.sh           $out/lib/scout-lib.sh
         install -Dm644 $src/lib/scout-module.nix       $out/lib/scout-module.nix
@@ -69,6 +78,7 @@
         install -Dm755 $src/lib/apply-flakelet.sh      $out/lib/apply-flakelet.sh
         install -Dm755 $src/lib/flakelet-access.sh     $out/lib/flakelet-access.sh
         install -Dm755 $src/lib/hm-activate-files.sh   $out/lib/hm-activate-files.sh
+        patchShebangs $out/lib
         for script in apply-hm.sh hm-activate-files.sh; do
           wrapProgram $out/lib/$script --prefix PATH : ${scoutScriptPath}
         done

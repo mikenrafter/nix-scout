@@ -426,14 +426,27 @@ in
   # still out of sync after this hits the moduleMissingInputs/
   # moduleDummyNodes eval-time error above on the *next* rebuild, same as
   # if this script didn't exist at all.
+  #
+  # Activation PATH is minimal: do not rely on `#!/usr/bin/env bash` or on
+  # getent living in coreutils (it doesn't — pkgs.getent). Invoke bash and
+  # getent by absolute store path, and pass a PATH that covers nix-scout's
+  # own runtime needs (nix, coreutils, …).
   system.activationScripts.nix-scout-update-locks = {
     text = ''
       parent_owner="$(${pkgs.coreutils}/bin/stat -c '%U' ${lib.escapeShellArg parent} 2>/dev/null || true)"
       if [[ -n "$parent_owner" && "$parent_owner" != "root" ]]; then
-        parent_home="$(${pkgs.coreutils}/bin/getent passwd "$parent_owner" | ${pkgs.coreutils}/bin/cut -d: -f6)"
+        parent_home="$(${pkgs.getent}/bin/getent passwd "$parent_owner" | ${pkgs.coreutils}/bin/cut -d: -f6)"
         ${pkgs.util-linux}/bin/runuser -u "$parent_owner" -- \
-          ${pkgs.coreutils}/bin/env HOME="$parent_home" \
-            ${nixScoutPkg}/bin/nix-scout update all \
+          ${pkgs.coreutils}/bin/env \
+            HOME="$parent_home" \
+            PATH="${lib.makeBinPath [
+              pkgs.bash
+              pkgs.coreutils
+              pkgs.findutils
+              pkgs.gnugrep
+              pkgs.nix
+            ]}" \
+            ${pkgs.bash}/bin/bash ${nixScoutPkg}/bin/nix-scout update all \
         || echo "nix-scout: update all failed (non-fatal)" >&2
       fi
     '';

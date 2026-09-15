@@ -60,6 +60,25 @@ if [[ -f "$NS_MODULE" ]]; then
   else
     pass "activation clear does not contain nix build / nix-build"
   fi
+
+  echo "-- nix-scout-update-locks: activation-safe getent + bash --"
+  if "$GREP" -q 'activationScripts\.nix-scout-update-locks' "$NS_MODULE"; then
+    pass "system.activationScripts.nix-scout-update-locks defined"
+  else
+    fail "activation must define nix-scout-update-locks ($NS_MODULE)"
+  fi
+  LOCKS_BLOCK="$(awk '/system\.activationScripts\.nix-scout-update-locks = \{/{f=1} f{print} f && /^  \};/{exit}' "$NS_MODULE")"
+  if [[ -z "$LOCKS_BLOCK" ]]; then
+    fail "could not isolate the nix-scout-update-locks activationScripts block ($NS_MODULE)"
+  elif printf '%s' "$LOCKS_BLOCK" | "$GREP" -qE 'coreutils.*/bin/getent|pkgs\.coreutils\}/bin/getent'; then
+    fail "update-locks must not use coreutils/bin/getent (getent is pkgs.getent)"
+  elif ! printf '%s' "$LOCKS_BLOCK" | "$GREP" -qE 'pkgs\.getent|/bin/getent'; then
+    fail "update-locks must invoke getent via pkgs.getent"
+  elif ! printf '%s' "$LOCKS_BLOCK" | "$GREP" -qE 'pkgs\.bash\}/bin/bash|bash\}/bin/bash'; then
+    fail "update-locks must invoke nix-scout via absolute pkgs.bash (activation PATH has no bash)"
+  else
+    pass "update-locks uses pkgs.getent and absolute bash"
+  fi
 else
   fail "nixos-module.nix not found at $NS_MODULE (cannot verify activation clear)"
 fi
