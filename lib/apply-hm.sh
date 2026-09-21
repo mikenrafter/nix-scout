@@ -135,3 +135,22 @@ _scout_diff_run_log_finish
 if [[ -d "$STORE/home-files" ]]; then
   echo "nix-scout: applied home-files scout $NAME from $STORE"
 fi
+
+# Optional per-module activate hook: executable $STORE/activate runs after
+# home-files are applied (or alone, for activate-only packages). Both
+# `nix-scout switch` and the NixOS nix-scout-home-files activation path hit
+# this — baseline is the wrong place for switch-time work.
+if [[ -x "$STORE/activate" ]]; then
+  echo "nix-scout: running activate for $NAME" >&2
+  if ! env HOME="$HOME" \
+      USER="${USER:-}" \
+      XDG_CONFIG_HOME="${XDG_CONFIG_HOME:-}" \
+      XDG_STATE_HOME="${XDG_STATE_HOME:-}" \
+      NIX_SCOUT_MODULE="$NAME" \
+      NIX_SCOUT_STORE="$STORE" \
+      NIX_SCOUT_ACTIVATION="${NIX_SCOUT_ACTIVATION:-}" \
+      "$STORE/activate"; then
+    echo "nix-scout: activate failed for $NAME" >&2
+    exit 1
+  fi
+fi

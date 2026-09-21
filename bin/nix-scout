@@ -101,6 +101,8 @@ kept current without a separate manual step.
 Facets: a scout module may export any combination of:
   profile     packages.<system>.scout with bin/  — installed into scout nix profile
   home-files  packages.<system>.scout with home-files/ — files copied into \$HOME
+  activate    packages.<system>.scout with executable activate — runs after
+              home-files apply on both 'nix-scout switch' and rebuild activation
   baseline    a NixOS module, imported directly on nixos-rebuild — can set ANY
               system-wide option. Never built/applied by 'nix-scout switch';
               only takes effect on the next rebuild.

@@ -212,4 +212,42 @@ run_activation "$STORE"
 assert_rc0 "activation with no home-files/ tree exit 0"
 assert_manifest_lacks ".config/scoutapp/config.json" "dropped-facet module sweeps its manifest"
 
+# --- optional $STORE/activate runs after home-files (switch + rebuild) ------
+STORE="$WORKDIR/gen-activate"
+"$MKDIR" -p "$STORE/home-files/.config/scoutapp"
+printf 'ok\n' >"$STORE/home-files/.config/scoutapp/config.json"
+MARKER="$WORKDIR/activate-ran"
+cat >"$STORE/activate" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+printf 'module=%s\\n' "\${NIX_SCOUT_MODULE:-}" >"$MARKER"
+EOF
+chmod +x "$STORE/activate"
+run_cli "$STORE"
+assert_rc0 "CLI apply-hm with activate exit 0"
+if [[ -f "$MARKER" && "$(cat "$MARKER")" == "module=scoutapp" ]]; then
+  pass "CLI apply-hm runs \$STORE/activate with NIX_SCOUT_MODULE set"
+else
+  fail "expected activate marker with module=scoutapp, got $(printf %q "$(cat "$MARKER" 2>/dev/null || true)")"
+fi
+"$RM" -f "$MARKER"
+run_activation "$STORE"
+assert_rc0 "activation apply-hm with activate exit 0"
+if [[ -f "$MARKER" && "$(cat "$MARKER")" == "module=scoutapp" ]]; then
+  pass "activation apply-hm runs \$STORE/activate"
+else
+  fail "expected activate on rebuild path, got $(printf %q "$(cat "$MARKER" 2>/dev/null || true)")"
+fi
+
+STORE="$WORKDIR/gen-activate-fail"
+"$MKDIR" -p "$STORE"
+printf '%s\n' '#!/usr/bin/env bash' 'exit 42' >"$STORE/activate"
+chmod +x "$STORE/activate"
+run_cli "$STORE"
+if [[ "$CAPTURED_RC" -ne 0 && "$CAPTURED_ERR" == *"activate failed"* ]]; then
+  pass "activate non-zero exit fails apply-hm"
+else
+  fail "expected activate failure to fail apply-hm, rc=$CAPTURED_RC err=$(printf %q "$CAPTURED_ERR")"
+fi
+
 finish_suite
