@@ -45,6 +45,26 @@ let
   scoutPkgs = pkgs.extend nixScout.overlays.default;
   nixScoutPkg = scoutPkgs.nix-scout;
 
+  # Build the plugin against the same Nix the daemon/client loads (ABI).
+  # Falls back to pkgs.nix.libs when the host package has no .libs split.
+  nixScoutPlugin =
+    let
+      nixPkg = config.nix.package;
+      nixCmd =
+        if nixPkg ? libs && nixPkg.libs ? nix-cmd then nixPkg.libs.nix-cmd
+        else if pkgs.nix ? libs && pkgs.nix.libs ? nix-cmd then pkgs.nix.libs.nix-cmd
+        else throw "nix-scout: cannot find nix-cmd library for plugin build (need config.nix.package.libs.nix-cmd)";
+    in
+      pkgs.callPackage (nixScout + "/plugin/package.nix") {
+        nix-cmd = nixCmd;
+      };
+
+  # hiPrio PATH `nix` that only intercepts `scout` (see bin/nix-wrap.sh).
+  nixScoutNixWrap = lib.hiPrio (pkgs.runCommand "nix-scout-nix-wrap" { } ''
+    mkdir -p $out/bin
+    cp ${nixScoutPkg}/bin/nix-wrap $out/bin/nix
+  '');
+
   scoutDirs = lib.filterAttrs (name: v:
     v == "directory" && builtins.pathExists (evalModulesDir + "/${name}/flake.nix")
   ) (builtins.readDir evalModulesDir);
@@ -257,7 +277,16 @@ in
 
   nixpkgs.overlays = [ nixScout.overlays.default ];
 
-  environment.systemPackages = prebuiltModules;
+  # RegisterCommand shim (help + NIX_GET_COMPLETIONS). Append so we do not
+  # clobber other plugins (e.g. nix-tarmac).
+  nix.settings.plugin-files = lib.mkAfter [
+    "${nixScoutPlugin}/lib/nix/plugins/nix-scout.so"
+  ];
+
+  environment.systemPackages = prebuiltModules ++ [
+    nixScoutPkg
+    nixScoutNixWrap
+  ];
 
   services.flakelets = {
     enable = true;

@@ -195,9 +195,20 @@ else
   fail "nix-scout update <name> failed: $(printf %q "$CAPTURED_ERR$CAPTURED_OUT")"
 fi
 
-echo "-- CLI: nix-scout update all --"
+echo "-- CLI: nix-scout update <name> <name> (in order) --"
 run_capture bash "$NEW_LIB" "$NIX_SCOUT_MODULES" sync-example-two scout
 [[ "$CAPTURED_RC" -eq 0 ]] || { fail "second scaffold failed"; finish_suite; }
+run_capture "$BIN" update sync-example sync-example-two
+if [[ "$CAPTURED_RC" -eq 0 \
+  && "$CAPTURED_ERR" == *"update sync-example"* \
+  && "$CAPTURED_ERR" == *"update sync-example-two"* \
+  && "$CAPTURED_ERR" == *"update sync-example"*"update sync-example-two"* ]]; then
+  pass "nix-scout update visits each named module in order"
+else
+  fail "nix-scout update multi-module failed: $(printf %q "$CAPTURED_ERR$CAPTURED_OUT")"
+fi
+
+echo "-- CLI: nix-scout update all --"
 run_capture "$BIN" update all
 if [[ "$CAPTURED_RC" -eq 0 ]]; then
   pass "nix-scout update all exit 0"

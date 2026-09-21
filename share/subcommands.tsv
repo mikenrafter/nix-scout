@@ -1,0 +1,10 @@
+list	List scout modules
+inspect	Evaluate and explain a scout module
+new	Scaffold a scout module
+switch	Materialize, build, and apply a scout module
+update	Sync a module's flake.lock with its declared inputs
+status	Show active scout profile and gc-roots
+clear	Clear scout profile and gc-roots
+doctor	Check flakelet integration health
+completions	Print shell completions to stdout
+help	Show usage
