@@ -60,6 +60,10 @@ let
       };
 
   # hiPrio PATH `nix` that only intercepts `scout` (see bin/nix-wrap.sh).
+  # Kept packaged but not installed while we verify whether RegisterCommand
+  # alone works on Nix 2.36 (CppNix still resolves top-level subcommands
+  # before initPlugins — see NixOS/nix#2597). Re-enable in systemPackages
+  # if `nix scout` still fails after a plugin-only rebuild.
   nixScoutNixWrap = lib.hiPrio (pkgs.runCommand "nix-scout-nix-wrap" { } ''
     mkdir -p $out/bin
     cp ${nixScoutPkg}/bin/nix-wrap $out/bin/nix
@@ -285,7 +289,7 @@ in
 
   environment.systemPackages = prebuiltModules ++ [
     nixScoutPkg
-    nixScoutNixWrap
+    # nixScoutNixWrap  # disabled: plugin-only experiment (see definition above)
   ];
 
   services.flakelets = {

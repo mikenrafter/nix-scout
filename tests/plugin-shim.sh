@@ -134,7 +134,7 @@ fi
 echo "-- version gate constants --"
 for tok in \
   'NIX_SCOUT_PLUGIN_MIN_MINOR 34' \
-  'NIX_SCOUT_PLUGIN_MAX_MINOR 36' \
+  'NIX_SCOUT_PLUGIN_MAX_MINOR 37' \
   'NIX_SCOUT_PLUGIN_MIN_MAJOR 2' \
   'NIX_SCOUT_PLUGIN_MAX_MAJOR 2'; do
   if "$GREP" -q "$tok" "$VERSION_HH"; then
