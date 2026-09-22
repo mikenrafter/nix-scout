@@ -21,6 +21,7 @@ suites=(
   activation-clear.sh
   activation-home-files.sh
   flakelet.sh
+  interrupt.sh
   baseline.sh
   module-adapters.sh
   cli.sh

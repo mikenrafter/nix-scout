@@ -354,7 +354,7 @@ _switch_module() {
   local name="$1"
   shift
   local nix_extra=("$@")
-  local modules mod_dir mat store_path err_log nix_ok
+  local modules mod_dir mat store_path err_log nix_ok step_rc
   local has_pkg=false has_flt=false switch_rc=0
 
   modules="$(_resolve_modules)"
@@ -365,8 +365,13 @@ _switch_module() {
   fi
 
   env NIX_SCOUT_PARENT="$(_resolve_parent)" \
-    bash "$(_scout_lib update-module.sh)" "$mod_dir" >&2 \
-    || echo "nix-scout: warning: flake.lock sync failed for $name — continuing with existing lock" >&2
+    bash "$(_scout_lib update-module.sh)" "$mod_dir" >&2
+  step_rc=$?
+  if [[ "$step_rc" -eq 130 ]]; then
+    return "$step_rc"
+  elif [[ "$step_rc" -ne 0 ]]; then
+    echo "nix-scout: warning: flake.lock sync failed for $name — continuing with existing lock" >&2
+  fi
 
   grep -qE '[^#]*(packages\.|\.scout)' "$mod_dir/flake.nix" 2>/dev/null && has_pkg=true
   grep -q 'flakelets' "$mod_dir/flake.nix" 2>/dev/null && has_flt=true
@@ -382,14 +387,29 @@ _switch_module() {
     NIX_SCOUT_USER="$_SCOUT_USER" \
     NIX_SCOUT_HOME="$_SCOUT_HOME" \
     bash "$(_scout_lib materialize-module.sh)" "$mod_dir")"
+  step_rc=$?
+  if [[ "$step_rc" -eq 130 ]]; then
+    return "$step_rc"
+  fi
   mat="${mat%%$'\n'*}"
 
   if [[ "$has_pkg" == "true" ]]; then
     echo "nix-scout: build $mat#scout" >&2
     err_log="$(mktemp)"
-    store_path="$(nix build --no-link --print-out-paths --no-write-lock-file \
-      "${nix_extra[@]}" "path:$mat#scout" 2>"$err_log")" \
-      && nix_ok=true || nix_ok=false
+    if store_path="$(nix build --no-link --print-out-paths --no-write-lock-file \
+      "${nix_extra[@]}" "path:$mat#scout" 2>"$err_log")"; then
+      nix_ok=true
+      step_rc=0
+    else
+      step_rc=$?
+      nix_ok=false
+    fi
+    # Ordinary build failures are accumulated below, but an interrupt must
+    # escape the per-module fan-out immediately.
+    if [[ "$step_rc" -eq 130 ]]; then
+      rm -f "$err_log"
+      return "$step_rc"
+    fi
     grep -Ev '^(warning: not writing modified lock file|• (Removed|Updated|Added) input|    '\''|  → )' \
       "$err_log" >&2 || true
     rm -f "$err_log"
@@ -404,18 +424,18 @@ _switch_module() {
         XDG_CONFIG_HOME="${XDG_CONFIG_HOME:-}" \
         NIX_SCOUT_PROFILE="$NIX_SCOUT_PROFILE" \
         bash "$(_scout_lib apply-hm.sh)" "$store_path" "$name" \
-        || { switch_rc=$?; echo "nix-scout: apply-hm failed for $name" >&2; }
+        || { step_rc=$?; [[ "$step_rc" -eq 130 ]] && return "$step_rc"; switch_rc=$step_rc; echo "nix-scout: apply-hm failed for $name" >&2; }
       env HOME="$_SCOUT_HOME" \
         USER="$_SCOUT_USER" \
         XDG_CONFIG_HOME="${XDG_CONFIG_HOME:-}" \
         NIX_SCOUT_PROFILE="$NIX_SCOUT_PROFILE" \
         bash "$(_scout_lib apply-env.sh)" "$store_path" "$name" \
-        || { switch_rc=$?; echo "nix-scout: apply-env failed for $name" >&2; }
+        || { step_rc=$?; [[ "$step_rc" -eq 130 ]] && return "$step_rc"; switch_rc=$step_rc; echo "nix-scout: apply-env failed for $name" >&2; }
     fi
   fi
 
   bash "$(_scout_lib apply-flakelet.sh)" "$name" "$mod_dir" \
-    || { switch_rc=$?; echo "nix-scout: flakelet apply failed for $name" >&2; }
+    || { step_rc=$?; [[ "$step_rc" -eq 130 ]] && return "$step_rc"; switch_rc=$step_rc; echo "nix-scout: flakelet apply failed for $name" >&2; }
 
   return $switch_rc
 }
@@ -473,8 +493,15 @@ cmd_switch() {
       exit 1
     fi
   done
+  local module_rc
   for name in "${names[@]}"; do
-    _switch_module "$name" "${nix_extra[@]}" || rc=$?
+    _switch_module "$name" "${nix_extra[@]}" || {
+      module_rc=$?
+      if [[ "$module_rc" -eq 130 ]]; then
+        return "$module_rc"
+      fi
+      rc=$module_rc
+    }
   done
   return $rc
 }
