@@ -12,7 +12,8 @@ NAME="${2:?module name required}"
 shift 2
 
 # shellcheck source=./scout-lib.sh
-source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/scout-lib.sh"
+SCOUT_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCOUT_LIB_DIR/scout-lib.sh"
 
 want_scout=false
 want_home=false
@@ -71,50 +72,73 @@ mkdir -p "$mod_dir"
   printf '%s\n' "  outputs = { nixpkgs, ... }@inputs:"
   printf '%s\n' "  let"
   printf '%s\n' "    system = \"x86_64-linux\";"
-  printf '%s\n' "    lib = nixpkgs.lib;"
+  printf '%s\n' "    mkScoutModule = (import ./scout-module.nix).mkScoutModule;"
   printf '%s\n' "  in"
-  printf '%s\n' "  lib.optionalAttrs (inputs ? nix-scout) ("
+  printf '%s\n' "  mkScoutModule inputs ("
   printf '%s\n' "    let"
-  printf '%s\n' "      pkgs = import nixpkgs { inherit system; };"
+  printf '%s\n' "      # Put shared definitions here. Each facet receives the same"
+  printf '%s\n' "      # all/args/necessary context from mkScoutModule."
+  printf '%s\n' "      shared = { };"
   printf '%s\n' "    in {"
 
   printf '%s\n' "      # scout"
   if [[ "$want_scout" == "true" && "$want_home" == "true" ]]; then
+    cat <<EOF
+      scout = { necessary, ... }:
+        let pkgs = necessary.pkgs; in {
+          packages.\${system}.scout = pkgs.symlinkJoin {
+            name = "scout-${NAME}";
+            paths = [
+              (pkgs.writeShellScriptBin "${NAME}" ''
+                echo "${NAME}: replace this scout stub"
+              '')
+              (pkgs.runCommand "scout-${NAME}-home" { } ''
+                mkdir -p \$out/home-files/.config/${NAME}
+                echo '{}' > \$out/home-files/.config/${NAME}/config.json
+              '')
+            ];
+          };
+      };
+EOF
     printf '%s\n' "      # home"
     cat <<EOF
-      packages.\${system}.scout = pkgs.symlinkJoin {
-        name = "scout-${NAME}";
-        paths = [
-          (pkgs.writeShellScriptBin "${NAME}" ''
-            echo "${NAME}: replace this scout stub"
-          '')
-          (pkgs.runCommand "scout-${NAME}-home" { } ''
-            mkdir -p \$out/home-files/.config/${NAME}
-            echo '{}' > \$out/home-files/.config/${NAME}/config.json
-          '')
-        ];
+      home = { ... }: {
+        homeBaseline = { ... }: {
+          home.file.".config/${NAME}/config.json".text = "{}";
+        };
       };
 EOF
   elif [[ "$want_scout" == "true" ]]; then
     cat <<EOF
-      packages.\${system}.scout = pkgs.buildEnv {
-        name = "scout-${NAME}";
-        paths = [
-          (pkgs.writeShellScriptBin "${NAME}" ''
-            echo "${NAME}: replace this scout stub"
-          '')
-        ];
-        pathsToLink = [ "/bin" ];
+      scout = { necessary, ... }:
+        let pkgs = necessary.pkgs; in {
+          packages.\${system}.scout = pkgs.buildEnv {
+            name = "scout-${NAME}";
+            paths = [
+              (pkgs.writeShellScriptBin "${NAME}" ''
+                echo "${NAME}: replace this scout stub"
+              '')
+            ];
+            pathsToLink = [ "/bin" ];
+          };
       };
 EOF
     printf '%s\n' "      # home"
   elif [[ "$want_home" == "true" ]]; then
     printf '%s\n' "      # home"
     cat <<EOF
-      packages.\${system}.scout = pkgs.runCommand "scout-${NAME}-home" { } ''
-        mkdir -p \$out/home-files/.config/${NAME}
-        echo '{}' > \$out/home-files/.config/${NAME}/config.json
-      '';
+      scout = { necessary, ... }:
+        let pkgs = necessary.pkgs; in {
+          packages.\${system}.scout = pkgs.runCommand "scout-${NAME}-home" { } ''
+            mkdir -p \$out/home-files/.config/${NAME}
+            echo '{}' > \$out/home-files/.config/${NAME}/config.json
+          '';
+        };
+      home = { ... }: {
+        homeBaseline = { ... }: {
+          home.file.".config/${NAME}/config.json".text = "{}";
+        };
+      };
 EOF
   else
     printf '%s\n' "      # home"
@@ -123,46 +147,56 @@ EOF
   printf '%s\n' "      # baseline"
   if [[ "$want_baseline" == "true" ]]; then
     cat <<EOF
-      baseline = { lib, ... }: {
-        # Add system-wide NixOS options here. Imported directly into the
-        # host's module list at nixos-rebuild eval time — never applied by
-        # \`nix-scout switch\`; only takes effect on the next rebuild.
-      };
+      baseline = { ... }:
+        {
+          baseline = { lib, ... }: {
+            # Add system-wide NixOS options here. Imported directly into the
+            # host's module list at nixos-rebuild eval time — never applied by
+            # \`nix-scout switch\`; only takes effect on the next rebuild.
+          };
+        };
+EOF
+  fi
+
+  printf '%s\n' "      # flakelet"
+  if [[ "$want_flakelet" == "true" ]]; then
+    cat <<EOF
+      flakelet = { necessary, ... }:
+        {
+          flakelets.default =
+            { types, ... }:
+            {
+              options = {
+                # Add flakelet options here.
+              };
+
+              impl =
+                { options, name, ... }:
+                {
+                  services.\${name} = {
+                    description = "${NAME}";
+                    after = [ "network.target" ];
+                    wantedBy = [ "multi-user.target" ];
+                    serviceConfig = {
+                      Type = "oneshot";
+                      RemainAfterExit = true;
+                      ExecStart = "\${necessary.pkgs.coreutils}/bin/true";
+                    };
+                  };
+                };
+            };
+        };
 EOF
   fi
 
   printf '%s\n' "    }"
-  printf '%s\n' "  ) // {"
-  printf '%s\n' "    # flakelet"
-  if [[ "$want_flakelet" == "true" ]]; then
-    cat <<EOF
-    flakelets.default =
-      { types, ... }:
-      {
-        options = {
-          # Add flakelet options here.
-        };
-
-        impl =
-          { options, pkgs, name, ... }:
-          {
-            services.\${name} = {
-              description = "${NAME}";
-              after = [ "network.target" ];
-              wantedBy = [ "multi-user.target" ];
-              serviceConfig = {
-                Type = "oneshot";
-                RemainAfterExit = true;
-                ExecStart = "\${pkgs.coreutils}/bin/true";
-              };
-            };
-          };
-      };
-EOF
-  fi
-  printf '%s\n' "  };"
+  printf '%s\n' "  );"
   printf '%s\n' "}"
 } >"$mod_dir/flake.nix"
+
+# The bare flakelet evaluator intentionally omits `inputs.nix-scout`, so keep
+# the helper beside the generated module as its fallback implementation.
+cp "$SCOUT_LIB_DIR/scout-module.nix" "$mod_dir/scout-module.nix"
 
 # --- settings.nix (flakelet registration) ------------------------------------
 if [[ "$want_flakelet" == "true" ]]; then

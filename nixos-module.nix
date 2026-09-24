@@ -163,6 +163,11 @@ let
         m = import (evalModulesDir + "/${name}/flake.nix");
       in
         m.outputs (inputs // {
+          # Let helper-based scout modules reuse the host's already-imported
+          # package set. Modules evaluated outside this path simply omit it
+          # and keep their historical local nixpkgs import fallback.
+          pkgs = pkgs;
+          system = pkgs.stdenv.hostPlatform.system;
           nix-scout = nixScout;
           systemRebuild = true;
           scoutContext = {

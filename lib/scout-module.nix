@@ -14,6 +14,42 @@ let
   adapters = import ./module-adapters.nix;
 in
 rec {
+  # Build the facet-separated output contract for a scout module.
+  #
+  # `inputs.pkgs` is supplied by the host NixOS adapter when the module is
+  # evaluated as part of a system rebuild. Standalone module evaluation does
+  # not have that value, so retain the historical fallback import there.
+  # `inputs ? nix-scout` remains an implementation detail of the evaluation
+  # mode; callers only need to provide the four facet functions.
+  mkScoutModule = inputs: facets:
+    let
+      isScoutEval = inputs ? nix-scout;
+      system = inputs.system or "x86_64-linux";
+      pkgs =
+        if inputs ? pkgs && inputs.pkgs != null
+        then inputs.pkgs
+        else import inputs.nixpkgs { inherit system; };
+      all = inputs;
+      args = {
+        inherit system isScoutEval;
+        mode = if isScoutEval then "nix-scout" else "flakelet";
+        systemRebuild = inputs.systemRebuild or false;
+      };
+      necessary = {
+        inherit pkgs;
+        lib = pkgs.lib;
+      };
+      call = name: facets.${name} { inherit all args necessary; };
+      facet = name:
+        if facets ? ${name}
+        then call name
+        else { };
+    in
+      (if isScoutEval
+       then facet "baseline" // facet "home" // facet "scout"
+       else { })
+      // facet "flakelet";
+
   readContext = moduleRoot: args:
     let
       contextFile = moduleRoot + "/scout-context.nix";
@@ -33,5 +69,6 @@ rec {
     then args.systemRebuild
     else (readContext moduleRoot args).systemRebuild);
 
-  inherit (adapters) nixosModule homeManagerModule;
+  nixosModule = adapters.nixosModule;
+  homeManagerModule = adapters.homeManagerModule;
 }

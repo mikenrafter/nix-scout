@@ -49,7 +49,7 @@ else
   finish_suite
 fi
 
-for token in '# baseline' 'baseline = ' 'optionalAttrs (inputs ? nix-scout)'; do
+for token in '# baseline' 'baseline = ' 'mkScoutModule' 'inputs ? nix-scout'; do
   if "$GREP" -qF "$token" "$flake"; then
     pass "flake.nix contains $token"
   else
@@ -57,16 +57,15 @@ for token in '# baseline' 'baseline = ' 'optionalAttrs (inputs ? nix-scout)'; do
   fi
 done
 
-# baseline must be emitted *inside* the `lib.optionalAttrs (inputs ? nix-scout) ( ... )`
-# block, not after the `) // {` merge that starts the flakelet section.
-gate_line="$("$GREP" -n 'optionalAttrs (inputs ? nix-scout)' "$flake" | "$HEAD" -n1 | cut -d: -f1)"
-merge_line="$("$GREP" -n ') // {' "$flake" | "$HEAD" -n1 | cut -d: -f1)"
+# baseline must be emitted through the shared mkScoutModule helper, which
+# gates it for nix-scout evaluation while leaving flakelet output available.
+gate_line="$("$GREP" -n 'mkScoutModule' "$flake" | "$HEAD" -n1 | cut -d: -f1)"
 baseline_line="$("$GREP" -n 'baseline = ' "$flake" | "$HEAD" -n1 | cut -d: -f1)"
-if [[ -n "$gate_line" && -n "$merge_line" && -n "$baseline_line" ]] \
-  && (( baseline_line > gate_line && baseline_line < merge_line )); then
-  pass "baseline stub sits inside the inputs?nix-scout-gated block, before the flakelet merge"
+if [[ -n "$gate_line" && -n "$baseline_line" ]] \
+  && (( baseline_line > gate_line )); then
+  pass "baseline stub sits inside mkScoutModule facet definitions"
 else
-  fail "baseline stub must be inside lib.optionalAttrs (inputs ? nix-scout) ( ... ), before ) // { # flakelet }"
+  fail "baseline stub must be inside mkScoutModule facet definitions"
 fi
 
 echo "-- baseline-only leaves empty scout/home/flakelet sections --"

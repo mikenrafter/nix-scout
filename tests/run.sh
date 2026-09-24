@@ -23,6 +23,7 @@ suites=(
   flakelet.sh
   interrupt.sh
   baseline.sh
+  mk-scout-module.sh
   module-adapters.sh
   cli.sh
   new-module.sh
