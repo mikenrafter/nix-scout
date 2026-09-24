@@ -48,6 +48,7 @@ rec {
       (if isScoutEval
        then facet "baseline" // facet "home" // facet "scout"
        else { })
+      // facet "legacy"
       // facet "flakelet";
 
   readContext = moduleRoot: args:

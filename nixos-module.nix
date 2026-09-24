@@ -42,6 +42,7 @@
 let
   evalModulesDir    = "${self}/${modulesRel}";
   runtimeModulesDir = "${parent}/${modulesRel}";
+  hostPkgs = pkgs;
   scoutPkgs = pkgs.extend nixScout.overlays.default;
   nixScoutPkg = scoutPkgs.nix-scout;
 
@@ -166,8 +167,8 @@ let
           # Let helper-based scout modules reuse the host's already-imported
           # package set. Modules evaluated outside this path simply omit it
           # and keep their historical local nixpkgs import fallback.
-          pkgs = pkgs;
-          system = pkgs.stdenv.hostPlatform.system;
+          pkgs = hostPkgs;
+          system = hostPkgs.stdenv.hostPlatform.system;
           nix-scout = nixScout;
           systemRebuild = true;
           scoutContext = {
