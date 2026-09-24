@@ -6,21 +6,21 @@ let
   mkScoutModule = nixScout.lib.mkScoutModule;
 
   facets = {
-    baseline = { necessary, ... }:
+    baseline = { pkgs, ... }:
       { baseline = { _module.args.mkScoutTestMarker =
-          if builtins.isString necessary.pkgs.hello then "supplied" else "fallback";
+          if builtins.isString pkgs.hello then "supplied" else "fallback";
         }; };
 
-    home = { necessary, ... }:
+    home = { pkgs, ... }:
       { homeBaseline = { _module.args.mkScoutTestMarker =
-          if builtins.isString necessary.pkgs.hello then "supplied" else "fallback";
+          if builtins.isString pkgs.hello then "supplied" else "fallback";
         }; };
 
-    scout = { necessary, ... }:
-      { packages.${system}.scout = necessary.pkgs.hello; };
+    scout = { pkgs, ... }:
+      { packages.${system}.scout = pkgs.hello; };
 
-    flakelet = { args, ... }:
-      { flakelets.default = { _testMode = args.mode; }; };
+    flakelet = { mode, ... }:
+      { flakelets.default = { _testMode = mode; }; };
   };
 
   supplied = mkScoutModule

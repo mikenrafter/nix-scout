@@ -16,11 +16,19 @@ in
 rec {
   # Build the facet-separated output contract for a scout module.
   #
-  # `inputs.pkgs` is supplied by the host NixOS adapter when the module is
-  # evaluated as part of a system rebuild. Standalone module evaluation does
-  # not have that value, so retain the historical fallback import there.
-  # `inputs ? nix-scout` remains an implementation detail of the evaluation
-  # mode; callers only need to provide the four facet functions.
+  # Each facet function has the same shape as an ordinary flake `outputs`
+  # function: it receives every input this module declares, by name, plus
+  # `pkgs`/`system`/`lib` (and `isScoutEval`/`mode`/`systemRebuild`) merged
+  # in alongside them — e.g. `scout = { nixpkgs, pkgs, system, break-lock,
+  # ... }@args: {...}`. No separate namespaced buckets to remember; it's the
+  # normal `outputs = inputs: ...` convention with a few extra keys added.
+  #
+  # `pkgs` is supplied by the host NixOS adapter (as `inputs.pkgs`) when the
+  # module is evaluated as part of a system rebuild. Standalone module
+  # evaluation does not have that value, so retain the historical fallback
+  # import there. `inputs ? nix-scout` remains an implementation detail of
+  # the evaluation mode; callers only need to provide the four facet
+  # functions.
   mkScoutModule = inputs: facets:
     let
       isScoutEval = inputs ? nix-scout;
@@ -29,17 +37,13 @@ rec {
         if inputs ? pkgs && inputs.pkgs != null
         then inputs.pkgs
         else import inputs.nixpkgs { inherit system; };
-      all = inputs;
-      args = {
-        inherit system isScoutEval;
+      callArgs = inputs // {
+        inherit system pkgs isScoutEval;
         mode = if isScoutEval then "nix-scout" else "flakelet";
         systemRebuild = inputs.systemRebuild or false;
-      };
-      necessary = {
-        inherit pkgs;
         lib = pkgs.lib;
       };
-      call = name: facets.${name} { inherit all args necessary; };
+      call = name: facets.${name} callArgs;
       facet = name:
         if facets ? ${name}
         then call name
