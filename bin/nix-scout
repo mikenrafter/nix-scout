@@ -477,7 +477,7 @@ _build_module() {
 
   if grep -q 'flakelets' "$mod_dir/flake.nix" 2>/dev/null; then
     echo "nix-scout: evaluate $mat#flakelets.default" >&2
-    nix eval --no-write-lock-file "path:$mat#flakelets.default" --apply 'x: builtins.attrNames x'
+    nix eval --no-write-lock-file "path:$mat#flakelets.default" --apply 'x: builtins.typeOf x'
   fi
 }
 
