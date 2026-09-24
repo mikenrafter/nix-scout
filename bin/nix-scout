@@ -73,6 +73,7 @@ Usage:
   nix-scout list                        List scout modules and their facets
   nix-scout inspect <name>              Evaluate and explain one scout module
   nix-scout new <name> [FACET...]       Scaffold a scout module (facets: scout home baseline flakelet)
+  nix-scout build <name...> [NIX-FLAGS] Materialize and build scout outputs without applying them
   nix-scout switch <name...> [NIX-FLAGS] Materialize, build, and apply scout modules (in order)
   nix-scout switch <path>               Install a store path or flake installable into profile
   nix-scout update <name...|all>        Sync module flake.lock(s) with declared inputs
@@ -447,6 +448,69 @@ _switch_path() {
   _priv_mkdir "$NIX_SCOUT_GCROOTS"
   _priv_ln_sfn "$arg" "$NIX_SCOUT_GCROOTS/program"
   echo "nix-scout: installed $arg into scout profile"
+}
+
+_build_module() {
+  local name="$1"
+  shift
+  local nix_extra=("$@")
+  local modules mod_dir mat err_log
+
+  modules="$(_resolve_modules)"
+  mod_dir="$modules/$name"
+  if [[ ! -f "$mod_dir/flake.nix" ]]; then
+    echo "nix-scout: module not found: $name (expected $mod_dir/flake.nix)" >&2
+    return 1
+  fi
+
+  echo "nix-scout: materialize $name from $mod_dir" >&2
+  mat="$(env NIX_SCOUT_PARENT="$(_resolve_parent)" \
+    NIX_SCOUT_USER="$_SCOUT_USER" NIX_SCOUT_HOME="$_SCOUT_HOME" \
+    bash "$(_scout_lib materialize-module.sh)" "$mod_dir")"
+  mat="${mat%%$'\n'*}"
+
+  if grep -qE '[^#]*(packages\.|\.scout)' "$mod_dir/flake.nix" 2>/dev/null; then
+    echo "nix-scout: build $mat#scout" >&2
+    nix build --no-link --print-out-paths --no-write-lock-file \
+      "${nix_extra[@]}" "path:$mat#scout"
+  fi
+
+  if grep -q 'flakelets' "$mod_dir/flake.nix" 2>/dev/null; then
+    echo "nix-scout: evaluate $mat#flakelets.default" >&2
+    nix eval --no-write-lock-file "path:$mat#flakelets.default" --apply 'x: builtins.attrNames x'
+  fi
+}
+
+cmd_build() {
+  local names=()
+  local nix_extra=()
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --)
+        shift
+        nix_extra+=("$@")
+        break
+        ;;
+      --*)
+        nix_extra+=("$1")
+        shift
+        ;;
+      *)
+        names+=("$1")
+        shift
+        ;;
+    esac
+  done
+  if [[ ${#names[@]} -eq 0 ]]; then
+    echo "nix-scout build: missing argument" >&2
+    usage >&2
+    exit 1
+  fi
+  local name rc=0
+  for name in "${names[@]}"; do
+    _build_module "$name" "${nix_extra[@]}" || rc=$?
+  done
+  return "$rc"
 }
 
 cmd_switch() {
@@ -895,6 +959,11 @@ case "${1:-}" in
     _require_user
     shift
     cmd_new "$@"
+    ;;
+  build)
+    _require_user
+    shift
+    cmd_build "$@"
     ;;
   switch)
     _require_user
