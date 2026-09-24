@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
-# Sync a scout module's committed flake.lock with the host's own flake.lock.
+# Sync a scout module's committed flake.lock with the host's own flake.lock,
+# after pointing each input it shares with the host at the host's source
+# (URL and branch — see sync_inputs_from_parent in scout-lib.sh).
 #
 # A scout module's own committed lock doesn't get independently resolved
 # anymore — it's just kept as a mirror of the host's (see
@@ -27,4 +29,5 @@ if [[ ! -f "$MODULE_DIR/flake.nix" ]]; then
   exit 1
 fi
 
+sync_inputs_from_parent "$MODULE_DIR"
 sync_lock_from_parent "$MODULE_DIR"

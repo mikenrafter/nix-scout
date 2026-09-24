@@ -23,22 +23,24 @@ let
       { flakelets.default = { _testMode = mode; }; };
   };
 
-  supplied = mkScoutModule
-    {
+  supplied = mkScoutModule ./.
+    ({
       inherit nixpkgs system;
       nix-scout = nixScout;
       pkgs = pkgs // { hello = "supplied"; };
-    }
+      systemRebuild = true;
+    })
     facets;
 
-  fallback = mkScoutModule
-    {
+  fallback = mkScoutModule ./.
+    ({
       inherit nixpkgs system;
       nix-scout = nixScout;
-    }
+      systemRebuild = true;
+    })
     facets;
 
-  flakelet = mkScoutModule { inherit nixpkgs system; } facets;
+  flakelet = mkScoutModule ./. { inherit nixpkgs system; } facets;
 in
 assert supplied.baseline._module.args.mkScoutTestMarker == "supplied";
 assert fallback.baseline._module.args.mkScoutTestMarker == "fallback";

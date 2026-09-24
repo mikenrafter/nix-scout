@@ -26,12 +26,17 @@ rec {
   # `pkgs` is supplied by the host NixOS adapter (as `inputs.pkgs`) when the
   # module is evaluated as part of a system rebuild. Standalone module
   # evaluation does not have that value, so retain the historical fallback
-  # import there. `inputs ? nix-scout` remains an implementation detail of
-  # the evaluation mode; callers only need to provide the four facet
-  # functions.
-  mkScoutModule = inputs: facets:
+  # import there. Facet gating uses scout-context (rebuild/switch vs
+  # standalone flakelet eval); callers pass ./. as moduleRoot and declare
+  # inputs.nix-scout for this helper.
+  # moduleRoot is usually ./. — used to read scout-context.nix during switch builds.
+  mkScoutModule = moduleRoot: inputs: facets:
     let
-      isScoutEval = inputs ? nix-scout;
+      context = readContext moduleRoot inputs;
+      isScoutEval =
+        inputs.systemRebuild or false
+        || context.mode == "rebuild"
+        || context.mode == "switch";
       system = inputs.system or "x86_64-linux";
       pkgs =
         if inputs ? pkgs && inputs.pkgs != null
@@ -52,7 +57,6 @@ rec {
       (if isScoutEval
        then facet "baseline" // facet "home" // facet "scout"
        else { })
-      // facet "legacy"
       // facet "flakelet";
 
   readContext = moduleRoot: args:

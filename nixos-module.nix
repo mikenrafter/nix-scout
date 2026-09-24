@@ -20,14 +20,9 @@
 # Missing settings.nix when flakelets is present is a hard eval error.
 #
 # Convention (enforced by `nix-scout new`, expected of every module):
-#   outputs = ... inputs:
-#     lib.optionalAttrs (inputs ? nix-scout) { # scout  # home  # baseline } // { # flakelet }
-# Empty sections keep only the denoting comment. Flakelet-only modules use a
-# single-arg `outputs = inputs:` so path: flakelet eval does not imply lockable inputs.
-# `baseline` lives in the same `inputs ? nix-scout`-gated block as `scout`/`home`
-# (both `nix-scout switch` and this file's rebuild-time prebuild provide
-# `inputs.nix-scout`; flakelet's own bare `path:` runtime eval never does, so it
-# never sees `baseline` either — same exclusion `scout`/`home` already get).
+#   outputs = { nixpkgs, ... }@inputs:
+#     inputs.nix-scout.lib.mkScoutModule ./. inputs { scout; home; baseline; flakelet; }
+# Empty facet sections keep only the denoting comment in generated scaffolds.
 #
 # module-mode: `scout`/`home`/`flakelet` facets cannot set system-wide NixOS options
 # (use core config, or the `baseline` facet, for that).

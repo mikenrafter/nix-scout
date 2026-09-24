@@ -85,7 +85,10 @@ Usage:
 NIX-FLAGS are forwarded to 'nix build' (e.g. --show-trace, --option foo bar).
 Flags may appear before or after <name>, or after -- for flags that take arguments.
 
-'nix-scout update' syncs a module's committed flake.lock from NIX_SCOUT_PARENT's
+'nix-scout update' first rewrites each flake.nix input URL the module shares
+with NIX_SCOUT_PARENT to the host's source and branch (a mismatched URL makes
+nix drop the host's lock entry and re-resolve), then syncs a module's
+committed flake.lock from NIX_SCOUT_PARENT's
 own flake.lock (the same starting point materialize-module.sh already uses
 for tmpdir builds at switch time), pruned down via 'nix flake metadata' to
 exactly what the module's flake.nix references -- the host's lock is a
@@ -110,7 +113,8 @@ Facets: a scout module may export any combination of:
   flakelet    flakelets.<attr> — registered with flakelet on rebuild; updated on switch
 
   Module flake.nix always uses facet separation:
-    lib.optionalAttrs (inputs ? nix-scout) { # scout  # home  # baseline } // { # flakelet }
+    Every scout module declares inputs.nix-scout and uses mkScoutModule ./. inputs { ... }.
+    See README.md for the facet layout (scout / home / baseline / flakelet).
   Empty sections keep the denoting comment. 'nix-scout new' scaffolds this layout.
 
   switch fan-out: each facet script self-detects and no-ops if its output is absent.

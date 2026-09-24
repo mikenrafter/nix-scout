@@ -13,7 +13,7 @@ require_nix
 
 echo "== profile + gc-roots (v2) =="
 
-scout_isolate
+scout_dogfood_isolate
 cleanup() { "$RM" -rf "$WORKDIR"; }
 trap cleanup EXIT
 

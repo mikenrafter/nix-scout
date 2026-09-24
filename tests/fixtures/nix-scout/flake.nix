@@ -12,24 +12,16 @@
   inputs.nix-scout.url = "github:mikenrafter/nix-scout";
   inputs.nix-scout.inputs.nixpkgs.follows = "nixpkgs";
 
-  outputs = { nixpkgs, ... }@inputs:
-  let
-    system = "x86_64-linux";
-    lib = nixpkgs.lib;
-  in
-  lib.optionalAttrs (inputs ? nix-scout) (
-    let
-      pkgs = import nixpkgs { inherit system; };
-    in {
-      # scout
-      # home
+  outputs = inputs:
+  inputs.nix-scout.lib.mkScoutModule ./. inputs {
+    scout = { pkgs, system, ... }: {
       packages.${system}.scout = pkgs.runCommand "scout-nix-scout-home" { } ''
         mkdir -p $out/home-files/.config/nix-scout-fixture
         echo '{}' > $out/home-files/.config/nix-scout-fixture/config.json
       '';
-      # baseline
-    }
-  ) // {
+    };
+    # home
+    # baseline
     # flakelet
   };
 }

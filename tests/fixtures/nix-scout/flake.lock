@@ -70,11 +70,11 @@
         "nixpkgs-unstable": "nixpkgs-unstable"
       },
       "locked": {
-        "lastModified": 1788213808,
-        "narHash": "sha256-+3Iao9aShwlSh09N7+0XqoUfVu6/IxpBEvU5Q1Uw1Mo=",
+        "lastModified": 1788326628,
+        "narHash": "sha256-x9tSjN3hdyXpHBUESmgGIGnuZ5T3mfsl/eramqcECDc=",
         "owner": "mikenrafter",
         "repo": "nix-scout",
-        "rev": "642fafe0a987e80ef30a5101c07c0bbc872704ef",
+        "rev": "44d84d683b5ced1fd9a1df2ae8e01ceeacc55311",
         "type": "github"
       },
       "original": {

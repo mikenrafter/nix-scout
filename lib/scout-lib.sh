@@ -317,6 +317,83 @@ pin_gcroot() {
   _priv_ln_sfn "$store" "$gcroots/$name"
 }
 
+# Point every input a module shares with the host at the host's own source.
+# A copied lock entry only survives if the module's `inputs.<name>.url`
+# resolves to the same flakeref as the host lock's `original` for that
+# name — otherwise nix discards it and re-resolves the module's URL (e.g.
+# github:owner/repo instead of the host's github:owner/repo/branch), so the
+# module silently builds against a different branch than the host.
+#
+# For each module input with a literal `url` whose host counterpart differs,
+# rewrites that string literal in flake.nix to the host's flakeref. Inputs
+# the host doesn't declare, `follows`-only inputs, and host inputs that are
+# themselves follows are left alone. Prints one line per rewrite; returns 1
+# if the plan can't be computed or a differing URL isn't a plain literal.
+sync_inputs_from_parent() {
+  local module_dir="$1"
+  local parent="${NIX_SCOUT_PARENT:-}"
+  local flake="$module_dir/flake.nix"
+  local parent_lock="$parent/flake.lock"
+
+  if [[ -z "$parent" ]]; then
+    echo "nix-scout: NIX_SCOUT_PARENT not set — cannot sync $flake inputs from the host" >&2
+    return 1
+  fi
+  if [[ ! -f "$parent_lock" ]]; then
+    echo "nix-scout: host flake.lock missing at $parent_lock — cannot sync $flake inputs" >&2
+    return 1
+  fi
+
+  local plan
+  if ! plan="$(NIX_SCOUT_SYNC_FLAKE="$(realpath "$flake")" \
+      NIX_SCOUT_SYNC_LOCK="$(realpath "$parent_lock")" \
+      nix eval --impure --json --expr '
+    let
+      mod = import (/. + builtins.getEnv "NIX_SCOUT_SYNC_FLAKE");
+      lock = builtins.fromJSON (builtins.readFile (/. + builtins.getEnv "NIX_SCOUT_SYNC_LOCK"));
+      hostInputs = lock.nodes.${lock.root}.inputs or { };
+      declared = mod.inputs or { };
+      normalize = url: builtins.flakeRefToString (builtins.parseFlakeRef url);
+      entry = name:
+        let
+          from = declared.${name}.url or null;
+          node = hostInputs.${name} or null;
+          to =
+            if builtins.isString node
+            then builtins.flakeRefToString lock.nodes.${node}.original
+            else null;
+        in
+        if !(builtins.isString from) || to == null || normalize from == to
+        then [ ]
+        else [ { inherit name from to; } ];
+    in
+    builtins.concatMap entry (builtins.attrNames declared)
+  ' 2>&1)"; then
+    echo "nix-scout: failed to compare $flake inputs with the host's: $plan" >&2
+    return 1
+  fi
+
+  [[ "$plan" == "[]" ]] && return 0
+  if [[ ! -w "$flake" ]]; then
+    echo "nix-scout: no write access to $flake" >&2
+    return 1
+  fi
+
+  local content name from to rc=0
+  content="$(<"$flake")"
+  while IFS=$'\t' read -r name from to; do
+    if [[ "$content" != *"\"$from\""* ]]; then
+      echo "nix-scout: $flake: input $name url is not a plain string literal — set it to \"$to\" by hand" >&2
+      rc=1
+      continue
+    fi
+    content="${content//"\"$from\""/"\"$to\""}"
+    echo "nix-scout: $flake: input $name $from -> $to"
+  done < <(jq -r '.[] | [.name, .from, .to] | @tsv' <<<"$plan")
+  printf '%s\n' "$content" >"$flake"
+  return "$rc"
+}
+
 # Sync a scout module's committed flake.lock from the parent (host) flake's
 # own already-resolved lock — nixpkgs, nix-scout, and anything else
 # (llm-agents, etc.) the host itself declares at top level. This is the same

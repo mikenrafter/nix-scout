@@ -174,6 +174,7 @@ let
   };
   # Without homeBaselineModules, baseline re-imports the wrapper and
   # double-declares sharedConfig's options against the NixOS injection.
+  # The duplicate declaration only throws once that option is read.
   dualWithoutSplit = builtins.tryEval (
     (home-manager.lib.homeManagerConfiguration {
       inherit pkgs;
@@ -186,7 +187,7 @@ let
           home.stateVersion = "26.05";
         }
       ];
-    }).config.home.file.".config/dual/from-consumer".enable
+    }).config.programs.dual.message
   );
 in
 assert builtins.elem "adapter-fixture.service" nixosInfo.units;

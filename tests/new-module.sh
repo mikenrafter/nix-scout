@@ -48,7 +48,7 @@ else
 fi
 
 mod="$NIX_SCOUT_MODULES/example-module"
-for f in flake.nix flake.lock settings.nix scout-module.nix; do
+for f in flake.nix flake.lock settings.nix; do
   if [[ -f "$mod/$f" ]]; then
     pass "created $f"
   else
@@ -57,7 +57,7 @@ for f in flake.nix flake.lock settings.nix scout-module.nix; do
 done
 
 flake="$mod/flake.nix"
-for token in '# scout' '# home' '# flakelet' 'mkScoutModule' 'inputs ? nix-scout' 'flakelets.default' 'packages.' 'home-files'; do
+for token in '# scout' '# home' '# flakelet' 'mkScoutModule' 'inputs.nix-scout.lib.mkScoutModule' 'flakelets.default' 'packages.' 'home-files'; do
   if "$GREP" -qF "$token" "$flake"; then
     pass "flake.nix contains $token"
   else

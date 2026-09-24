@@ -49,7 +49,7 @@ else
   finish_suite
 fi
 
-for token in '# baseline' 'baseline = ' 'mkScoutModule' 'inputs ? nix-scout'; do
+for token in '# baseline' 'baseline = ' 'mkScoutModule' 'inputs.nix-scout.lib.mkScoutModule'; do
   if "$GREP" -qF "$token" "$flake"; then
     pass "flake.nix contains $token"
   else

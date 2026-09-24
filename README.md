@@ -38,24 +38,33 @@ into `$HOME`, or (de)register a systemd service — without running a full
     `config`/`lib` like any ordinary module. `nix-scout switch` never builds
     or applies `baseline` at all; it only takes effect on the next rebuild.
 
-Every scout module's `flake.nix` follows the same boilerplate to keep the
-scout/home/baseline facets and the flakelet facet definitionally separate:
+Every scout module's `flake.nix` declares `inputs.nix-scout` and composes
+facets through `inputs.nix-scout.lib.mkScoutModule`:
 
 ```nix
-lib.optionalAttrs (inputs ? nix-scout) {
-  # scout
-  # home
-  # baseline
-} // {
-  # flakelet
+{
+  inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-26.05";
+  inputs.nix-scout.url = "github:mikenrafter/nix-scout";
+  inputs.nix-scout.inputs.nixpkgs.follows = "nixpkgs";
+
+  outputs = { nixpkgs, ... }@inputs:
+  inputs.nix-scout.lib.mkScoutModule ./. inputs {
+    # scout
+    scout = { pkgs, system, ... }: { packages.${system}.scout = ...; };
+    # home
+    # baseline
+    baseline = { ... }: { baseline = import ./baseline.nix; };
+    # flakelet
+    flakelet = { pkgs, lib, ... }: { flakelets.default = ...; };
+  };
 }
 ```
 
-`inputs ? nix-scout` is true when `nix-scout` (CLI switch, or the NixOS
-module's rebuild-time prebuild) is evaluating the module, and false when
-flakelet evaluates the module's `path:` flake on its own — so `baseline`
-(along with `scout`/`home`) never builds in flakelet's own evaluation
-context, same as `scout`/`home`.
+`mkScoutModule` gates `scout`/`home`/`baseline` using `scout-context.nix`
+(switch), the host rebuild prebuild (`systemRebuild = true`), or
+`scoutContext` passed from the NixOS module — not whether `nix-scout`
+appears in the flake input attrset. Flakelet evaluation via
+`builtins.getFlake` only forces the `flakelet` facet (lazy attr selection).
 
 ## Install
 
@@ -159,14 +168,11 @@ let
     config.services.paseo.enable = true;
   };
 in
-lib.optionalAttrs (inputs ? nix-scout) {
-  # scout
-  # home
-  # baseline
+inputs.nix-scout.lib.mkScoutModule ./. inputs {
   baseline = nix-scout.lib.nixosModule.baseline source;
-} // {
-  # flakelet
-  flakelets.default = nix-scout.lib.nixosModule.flakelet source;
+  flakelet = { ... }: {
+    flakelets.default = nix-scout.lib.nixosModule.flakelet source;
+  };
 };
 ```
 

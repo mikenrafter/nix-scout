@@ -11,7 +11,7 @@ source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_lib.sh"
 
 echo "== nix-scout CLI (v2) =="
 
-scout_isolate
+scout_dogfood_isolate
 cleanup() { "$RM" -rf "$WORKDIR"; }
 trap cleanup EXIT
 

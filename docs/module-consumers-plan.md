@@ -11,13 +11,13 @@ Existing hand-written facets remain valid. The adapters fit into the current `fl
 The module author declares a shared source inside `flake.nix`:
 
 ```nix
-outputs = { nixpkgs, nix-scout, paseo, ... }@inputs:
+outputs = { nix-scout, paseo, ... }@inputs:
 let
   system = "x86_64-linux";
-  lib = nixpkgs.lib;
 
   source = {
-    inherit nixpkgs system;
+    inherit (inputs) nixpkgs;
+    inherit system;
     modules = [ paseo.nixosModules.default ];
     settings = import ./settings.nix;
     config.services.paseo = {
@@ -26,15 +26,9 @@ let
     };
   };
 in
-lib.optionalAttrs (inputs ? nix-scout) {
-  # scout
-  # home
-
-  # baseline
-  baseline = nix-scout.lib.nixosModule.baseline source;
-} // {
-  # flakelet
-  flakelets.default = nix-scout.lib.nixosModule.flakelet source;
+nix-scout.lib.mkScoutModule ./. inputs {
+  baseline = _: { baseline = nix-scout.lib.nixosModule.baseline source; };
+  flakelet = _: { flakelets.default = nix-scout.lib.nixosModule.flakelet source; };
 };
 ```
 

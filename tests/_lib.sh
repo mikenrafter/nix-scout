@@ -46,6 +46,7 @@ BASENAME="$(_sys basename)"
 DIRNAME="$(_sys dirname)"
 READLINK="$(_sys readlink)"
 JQ="$(_sys jq)"
+SED="$(_sys sed)"
 
 # Harness PATH lookups must not auto-log (agent sessions wrap grep/head via tea).
 export TEA_OFF=1
@@ -209,6 +210,43 @@ scout_isolate() {
   if [[ -e "$REAL_USER_PROFILE" ]]; then
     REAL_PROFILE_SNAPSHOT="$("$LS" -la "$REAL_USER_PROFILE" 2>/dev/null || true)"
   fi
+}
+
+# Scratch host flake whose nix-scout input is this working tree, so fixture
+# modules evaluate against the lib under test rather than a pushed branch.
+# Seeds its lock from the repo's own so nixpkgs stays on the pinned rev.
+# Prints the host directory.
+scout_dogfood_parent() {
+  local host="${WORKDIR:?scout_isolate first}/dogfood-host"
+  "$MKDIR" -p "$host"
+  cat >"$host/flake.nix" <<EOF
+{
+  inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-26.05";
+  inputs.nix-scout.url = "path:$REPO";
+  inputs.nix-scout.inputs.nixpkgs.follows = "nixpkgs";
+  outputs = _: { };
+}
+EOF
+  "$CP" "$REPO/flake.lock" "$host/flake.lock"
+  "$CHMOD" 644 "$host/flake.lock"
+  nix flake lock "path:$host" >/dev/null 2>&1 || return 1
+  printf '%s' "$host"
+}
+
+# scout_isolate, then host = scout_dogfood_parent and modules = a scratch
+# copy of tests/fixtures — switch/update rewrite module inputs to the host's
+# path:$REPO, which must never land in the committed fixtures.
+scout_dogfood_isolate() {
+  scout_isolate
+  local host
+  host="$(scout_dogfood_parent)" || {
+    echo "FAIL: could not lock dogfood host flake (harness)" >&2
+    exit 2
+  }
+  "$CP" -r "$REPO/tests/fixtures" "$WORKDIR/fixtures"
+  "$CHMOD" -R u+w "$WORKDIR/fixtures"
+  export NIX_SCOUT_PARENT="$host" NIX_SCOUT_MODULES="$WORKDIR/fixtures"
+  scout_write_paths_file "$WORKDIR/nix-scout-paths"
 }
 
 assert_default_profile_untouched() {

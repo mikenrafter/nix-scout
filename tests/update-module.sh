@@ -151,6 +151,42 @@ else
   fail "nix flake metadata rewrote the synced lock — it wasn't fully pruned"
 fi
 
+echo "-- update points a drifted input URL back at the host's source/branch --"
+HOST_NIXPKGS_URL="$(nix eval --raw --impure --expr "
+  let lock = builtins.fromJSON (builtins.readFile $NIX_SCOUT_PARENT/flake.lock);
+  in builtins.flakeRefToString lock.nodes.\${lock.nodes.\${lock.root}.inputs.nixpkgs}.original")"
+HOST_NIXPKGS_REV="$("$JQ" -r '.nodes[.nodes[.root].inputs.nixpkgs].locked.rev' "$NIX_SCOUT_PARENT/flake.lock")"
+"$SED" -i "s#\"$HOST_NIXPKGS_URL\"#\"github:NixOS/nixpkgs\"#" "$MOD/flake.nix"
+if "$GREP" -qF '"github:NixOS/nixpkgs"' "$MOD/flake.nix"; then
+  pass "drifted nixpkgs to the default branch"
+else
+  fail "could not drift nixpkgs url (host url $HOST_NIXPKGS_URL)"
+fi
+run_capture bash "$UPDATE_LIB" "$MOD"
+if [[ "$CAPTURED_RC" -eq 0 && "$CAPTURED_OUT" == *"input nixpkgs github:NixOS/nixpkgs -> $HOST_NIXPKGS_URL"* ]]; then
+  pass "update reports the input URL rewrite"
+else
+  fail "expected an input rewrite report: rc=$CAPTURED_RC out=$(printf %q "$CAPTURED_OUT$CAPTURED_ERR")"
+fi
+if "$GREP" -qF "\"$HOST_NIXPKGS_URL\"" "$MOD/flake.nix" \
+  && ! "$GREP" -qF '"github:NixOS/nixpkgs"' "$MOD/flake.nix"; then
+  pass "flake.nix nixpkgs url matches the host's"
+else
+  fail "flake.nix nixpkgs url not restored to $HOST_NIXPKGS_URL"
+fi
+MOD_NIXPKGS_REV="$("$JQ" -r '.nodes[.nodes[.root].inputs.nixpkgs].locked.rev' "$MOD/flake.lock")"
+if [[ "$MOD_NIXPKGS_REV" == "$HOST_NIXPKGS_REV" ]]; then
+  pass "flake.lock nixpkgs rev matches the host's ($HOST_NIXPKGS_REV)"
+else
+  fail "flake.lock nixpkgs rev $MOD_NIXPKGS_REV != host $HOST_NIXPKGS_REV"
+fi
+run_capture bash "$UPDATE_LIB" "$MOD"
+if [[ "$CAPTURED_RC" -eq 0 && "$CAPTURED_OUT" != *"input nixpkgs"* ]]; then
+  pass "second update leaves matching inputs alone"
+else
+  fail "second update should not rewrite inputs: $(printf %q "$CAPTURED_OUT$CAPTURED_ERR")"
+fi
+
 echo "-- update errors clearly on a module with no flake.nix --"
 "$MKDIR" -p "$NIX_SCOUT_MODULES/no-flake"
 run_capture bash "$UPDATE_LIB" "$NIX_SCOUT_MODULES/no-flake"

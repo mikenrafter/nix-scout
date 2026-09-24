@@ -22,6 +22,9 @@ chmod -R u+w "$tmp"
 
 parent_lock="${NIX_SCOUT_PARENT}/flake.lock"
 if [[ -f "$parent_lock" ]]; then
+  # shellcheck source=./scout-lib.sh
+  source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/scout-lib.sh"
+  sync_inputs_from_parent "$tmp" >&2 || true
   cp "$parent_lock" "$tmp/flake.lock"
   echo "nix-scout: materialize copied parent flake.lock into $tmp" >&2
 elif [[ ! -f "$tmp/flake.lock" ]]; then
