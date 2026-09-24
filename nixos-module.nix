@@ -37,12 +37,11 @@
 # mode is satisfied.  The live WIP path (`parent`) is written to the runtime paths
 # file and used for flakelet path: references so the CLI always sees the live tree.
 
-{ config, lib, pkgs, self, ... }:
+{ config, lib, pkgs, hostPkgs ? pkgs, self, ... }:
 
 let
   evalModulesDir    = "${self}/${modulesRel}";
   runtimeModulesDir = "${parent}/${modulesRel}";
-  hostPkgs = pkgs;
   scoutPkgs = pkgs.extend nixScout.overlays.default;
   nixScoutPkg = scoutPkgs.nix-scout;
 
