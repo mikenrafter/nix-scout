@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # NixOS activation: system.activationScripts.nix-scout-clear clears profile +
-# gc-roots on rebuild/boot. Defined in the standalone nix-scout nixos-module.nix.
+# gc-roots immediately on switch, or once at first boot for a new generation.
 #
 # Run from repo root:
 #   modules/nix-scout/tests/activation-clear.sh
@@ -35,6 +35,17 @@ if [[ -f "$NS_MODULE" ]]; then
     fail "activation script not found in $NS_MODULE (want system.activationScripts.nix-scout-clear)"
   fi
 
+  CLEAR_BLOCK="$(awk '/system\.activationScripts\.nix-scout-clear = \{/{f=1} f{print} f && /^  \};/{exit}' "$NS_MODULE")"
+  if [[ -z "$CLEAR_BLOCK" ]]; then
+    fail "could not isolate the nix-scout-clear activationScripts block ($NS_MODULE)"
+  elif printf '%s' "$CLEAR_BLOCK" | "$GREP" -q 'NIXOS_ACTION.*boot' \
+    && printf '%s' "$CLEAR_BLOCK" | "$GREP" -q 'clear_marker' \
+    && printf '%s' "$CLEAR_BLOCK" | "$GREP" -q 'systemConfig'; then
+    pass "activation clear is guarded by boot action and generation marker"
+  else
+    fail "activation clear must defer boot cleanup and record the generation ($NS_MODULE)"
+  fi
+
   if "$GREP" -qE 'nix-env|NIX_SCOUT_PROFILE|profiles/per-user/.*/nix-scout' "$NS_MODULE" \
     && "$GREP" -qE 'gcroots|NIX_SCOUT_GCROOTS' "$NS_MODULE"; then
     pass "activation clear mentions profile + gc-roots cleanup"
@@ -52,7 +63,6 @@ if [[ -f "$NS_MODULE" ]]; then
   # Activation only clears — must not trigger a build. Scoped to the
   # nix-scout-clear block itself: nixos-module.nix legitimately contains
   # `nix build` elsewhere (the switch-path activation script).
-  CLEAR_BLOCK="$(awk '/system\.activationScripts\.nix-scout-clear = \{/{f=1} f{print} f && /^  \};/{exit}' "$NS_MODULE")"
   if [[ -z "$CLEAR_BLOCK" ]]; then
     fail "could not isolate the nix-scout-clear activationScripts block ($NS_MODULE)"
   elif printf '%s' "$CLEAR_BLOCK" | "$GREP" -qE 'nix build|nix-build'; then

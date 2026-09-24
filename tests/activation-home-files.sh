@@ -71,11 +71,11 @@ if [[ -f "$NS_MODULE" ]]; then
     fail "home-files activation must run apply-hm.sh as the owning user, e.g. via runuser ($NS_MODULE)"
   fi
 
-  # Must fan out per normalUserNames, same as nix-scout-dirs/nix-scout-clear.
+  # Must fan out per normalUserNames, same as nix-scout-dirs.
   if "$GREP" -A25 'activationScripts.nix-scout-home-files' "$NS_MODULE" | "$GREP" -qE 'normalUserNames'; then
     pass "home-files activation fans out over normalUserNames"
   else
-    fail "home-files activation must iterate normalUserNames like nix-scout-dirs/nix-scout-clear ($NS_MODULE)"
+    fail "home-files activation must iterate normalUserNames like nix-scout-dirs ($NS_MODULE)"
   fi
 
   # A single broken module/user must not fail the whole rebuild.

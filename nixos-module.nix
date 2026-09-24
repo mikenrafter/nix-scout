@@ -1,6 +1,6 @@
 { nixScout, parent, modulesRel, flakelet, inputs }:
 
-# nix-scout host framework — PATH, profile, HM copy-activator, clear-on-activation.
+# nix-scout host framework — PATH, profile, HM copy-activator, generation-aware clear.
 # Scout payload modules live under ${parent}/${modulesRel} and are switched at runtime.
 #
 # Constructor: nixosModule parent modulesRel hostInputs
@@ -434,16 +434,30 @@ in
 
   system.activationScripts.nix-scout-clear = {
     text = lib.concatMapStrings (user: ''
-      scout_profile="/nix/var/nix/profiles/per-user/${user}/nix-scout"
-      scout_gcroots="/nix/var/nix/gcroots/per-user/${user}/nix-scout"
+      # Activation runs during boot as well as nixos-rebuild. A switch clears
+      # immediately; a boot activation clears only once for this generation.
+      # This lets `nixos-rebuild boot` defer the clear until the actual boot,
+      # while preventing subsequent boots of the same generation from doing it
+      # again.
+      clear_marker="/var/lib/nix-scout/clear/${user}"
+      if [[ "''${NIXOS_ACTION:-switch}" != "boot" \
+        || ! -f "$clear_marker" \
+        || "$(cat "$clear_marker")" != "$systemConfig" ]]; then
+        scout_profile="/nix/var/nix/profiles/per-user/${user}/nix-scout"
+        scout_gcroots="/nix/var/nix/gcroots/per-user/${user}/nix-scout"
 
-      if [[ -e "$scout_profile" ]]; then
-        ${pkgs.nix}/bin/nix-env -p "$scout_profile" --uninstall '.*' 2>/dev/null || true
-        rm -f "$scout_profile" "$scout_profile-"* 2>/dev/null || true
-      fi
+        if [[ -e "$scout_profile" ]]; then
+          ${pkgs.nix}/bin/nix-env -p "$scout_profile" --uninstall '.*' 2>/dev/null || true
+          rm -f "$scout_profile" "$scout_profile-"* 2>/dev/null || true
+        fi
 
-      if [[ -d "$scout_gcroots" ]]; then
-        find "$scout_gcroots" -mindepth 1 -delete 2>/dev/null || true
+        if [[ -d "$scout_gcroots" ]]; then
+          find "$scout_gcroots" -mindepth 1 -delete 2>/dev/null || true
+        fi
+
+        install -d -m755 /var/lib/nix-scout/clear
+        printf '%s\n' "$systemConfig" > "$clear_marker"
+        chmod 644 "$clear_marker"
       fi
     '') normalUserNames;
     deps = [ "users" "nix-scout-dirs" ];
