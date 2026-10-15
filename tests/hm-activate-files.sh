@@ -189,6 +189,62 @@ else
   fail "directory-valued entry content mismatch: $(printf %q "$got")"
 fi
 
+echo "-- regression: pre-existing directory-symlink at destination (migration from ln -Tsf) --"
+# A $HOME that predates this script's switch from linkGeneration (ln -Tsf)
+# can still have a *directory-level* symlink sitting at the destination
+# (e.g. ~/.local/share/fish/home-manager/generated_completions -> an old
+# generation's store path), left over from when stock Home Manager made
+# one symlink per directory-valued home.file entry. mkdir -p sees that
+# symlink and considers the destination dir "already there," so the later
+# cp --force for a file inside it writes through the symlink into the
+# (read-only) store and fails. ensure_real_dir must detect and replace
+# ancestor symlinks, not just a symlink at the leaf file itself.
+
+GEN_G_STORE="$WORKDIR/gen-g-store"
+GEN_G="$WORKDIR/new-gen-g"
+STALE_STORE="$WORKDIR/stale-completions-store"
+
+"$MKDIR" -p \
+  "$GEN_G_STORE/.local/share/fish/home-manager/generated_completions" \
+  "$STALE_STORE" \
+  "$HOME/.local/share/fish/home-manager" \
+  "$GEN_G"
+printf 'complete -c bar\n' >"$GEN_G_STORE/.local/share/fish/home-manager/generated_completions/bar.fish"
+printf 'complete -c stale\n' >"$STALE_STORE/stale.fish"
+# Simulate the pre-migration state: destination dir is a symlink into an
+# unrelated (and, like the real store, immutable-for-this-test) directory.
+# The GEN_C test above already left a real directory at this exact path
+# (from a directory-valued home.file entry) — ln -s onto an existing
+# directory links *into* it instead of replacing it, so that leftover
+# must be cleared first or this never reproduces the real scenario.
+"$RM" -rf "$HOME/.local/share/fish/home-manager/generated_completions"
+ln -s "$STALE_STORE" "$HOME/.local/share/fish/home-manager/generated_completions"
+"$CHMOD" a-w "$STALE_STORE"
+ln -s "$GEN_G_STORE" "$GEN_G/home-files"
+
+run_activator "$GEN_G" ""
+if [[ "$CAPTURED_RC" -eq 0 ]]; then
+  pass "activator exit 0 with pre-existing directory-symlink at destination"
+else
+  fail "activator failed on pre-existing directory-symlink (rc=$CAPTURED_RC err=$(printf %q "$CAPTURED_ERR"))"
+fi
+"$CHMOD" u+w "$STALE_STORE" 2>/dev/null || true
+
+GEN_G_COMPLETION="$HOME/.local/share/fish/home-manager/generated_completions/bar.fish"
+assert_regular_writable_file "$GEN_G_COMPLETION" "new file copied after replacing stale directory-symlink"
+
+if [[ -L "$HOME/.local/share/fish/home-manager/generated_completions" ]]; then
+  fail "generated_completions is still a symlink; ensure_real_dir did not replace it"
+else
+  pass "generated_completions is now a real directory, not the stale symlink"
+fi
+
+if [[ -e "$HOME/.local/share/fish/home-manager/generated_completions/stale.fish" ]]; then
+  fail "stale file from the old symlinked target leaked into the new real directory"
+else
+  pass "stale symlink target's contents did not leak in"
+fi
+
 echo "-- regression: systemd/user unit + .wants dropin stay symlinks --"
 # cp-ing these breaks systemd: a .wants/ dropin that isn't a real symlink is
 # rejected ("is not a symlink, ignoring"), so the unit never gets pulled in

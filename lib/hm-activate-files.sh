@@ -28,7 +28,13 @@ copy_new_gen() {
   while IFS= read -r -d '' src; do
     rel="${src#"$files"/}"
     dest="$HOME/$rel"
-    mkdir -p "$(dirname "$dest")"
+    # Not a plain mkdir -p: a whole ancestor directory can be a leftover
+    # symlink into the store (e.g. Home Manager's fish module used to link
+    # generated_completions/ as one directory-level symlink before this
+    # script switched to per-file copies). mkdir -p treats an existing
+    # symlink-to-a-directory as satisfied and leaves it alone, so the later
+    # cp below would write through it into the read-only store.
+    ensure_real_dir "$(dirname "$dest")"
 
     # systemd unit files (and .wants/.requires dropins) must stay real
     # symlinks: systemd refuses to honor a Wants= dropin that isn't one
@@ -56,6 +62,18 @@ copy_new_gen() {
     cp --force "$src" "$dest"
     chmod u+w "$dest"
   done < <(find -L "$files" -type f -print0)
+}
+
+ensure_real_dir() {
+  local dir="$1"
+  [[ "$dir" == "$HOME" || "$dir" == "/" ]] && return 0
+  if [[ -L "$dir" || ( -e "$dir" && ! -d "$dir" ) ]]; then
+    rm -f "$dir"
+  fi
+  if [[ ! -d "$dir" ]]; then
+    ensure_real_dir "$(dirname "$dir")"
+    mkdir "$dir"
+  fi
 }
 
 link_unit() {

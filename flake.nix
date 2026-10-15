@@ -24,32 +24,25 @@
       pkgs.findutils
       pkgs.jq
     ];
-  in {
-    lib = scoutModuleLib;
-
-    overlays.default = final: prev: {
-      nix-scout = self.packages.${prev.system}.nix-scout;
-    };
-
-    # parent: live filesystem path to the host flake root.
-    # modulesRel: directory under parent that contains <name>/flake.nix drop-ins.
-    # hostInputs: the host (parent) flake's own full, already-resolved `inputs`
-    # attrset — threaded through to scout-module eval-time calls so a module's
-    # declared inputs (nixpkgs, nix-scout, or anything else the host also
-    # declares at top level) resolve identically to what a real `nix build`
-    # against the parent-lock-derived flake.lock would give at switch time.
-    nixosModule = parent: modulesRel: hostInputs: {
-      _file = toString ./nixos-module.nix;
-      imports = [
-        (import ./nixos-module.nix {
-          nixScout = self;
-          inherit parent modulesRel flakelet;
-          inputs = hostInputs;
-        })
+    # nix-scout (the package consumed by nixos-module.nix / overlays.default)
+    # is dontBuild=true — pure shell scripts wrapped with wrapProgram, fully
+    # architecture-agnostic. Only the plugin involves native compilation, and
+    # that's architecture-agnostic too (headers-only against pkgs.nix.libs.nix-cmd,
+    # which nixpkgs provides per-system same as any other package). Upstream
+    # hardcodes a single system here; this phoe-nix-local patch (see
+    # flake.nix's nixos-apple-silicon-adjacent comment for the nixed host)
+    # makes `packages` multi-system so nixed (aarch64-linux) can use it too,
+    # without touching checks/devShells (still x86_64-linux only, unaffected).
+    supportedSystems = [ "x86_64-linux" "aarch64-linux" ];
+    mkPackages = system: let
+      pkgs = nixpkgs.legacyPackages.${system};
+      scoutScriptPath = pkgs.lib.makeBinPath [
+        pkgs.coreutils
+        pkgs.diffutils
+        pkgs.findutils
+        pkgs.jq
       ];
-    };
-
-    packages.${system} = {
+    in {
       nix-scout-plugin = pkgs.callPackage ./plugin/package.nix {
         nix-cmd = pkgs.nix.libs.nix-cmd;
       };
@@ -72,8 +65,6 @@
             pkgs.nix
             pkgs.getent
           ]}
-          # PATH shim for `nix scout` (CppNix loads plugins after subcommand
-          # resolution; the NixOS module installs this as a hiPrio `nix`).
           install -Dm755 $src/bin/nix-wrap.sh $out/bin/nix-wrap
           substituteInPlace $out/bin/nix-wrap \
             --replace-fail '@real_nix@' '${pkgs.nix}/bin/nix' \
@@ -103,7 +94,6 @@
           mkdir -p $out/share/bash-completion/completions
           bash $out/bin/nix-scout completions bash \
             > $out/share/bash-completion/completions/nix-scout
-          # nixpkgs zsh adds $out/share/zsh/site-functions to fpath (see pkgs.zsh).
           mkdir -p $out/share/zsh/site-functions
           bash $out/bin/nix-scout completions zsh \
             > $out/share/zsh/site-functions/_nix-scout
@@ -116,6 +106,32 @@
         };
       };
     };
+  in {
+    lib = scoutModuleLib;
+
+    overlays.default = final: prev: {
+      nix-scout = self.packages.${prev.system}.nix-scout;
+    };
+
+    # parent: live filesystem path to the host flake root.
+    # modulesRel: directory under parent that contains <name>/flake.nix drop-ins.
+    # hostInputs: the host (parent) flake's own full, already-resolved `inputs`
+    # attrset — threaded through to scout-module eval-time calls so a module's
+    # declared inputs (nixpkgs, nix-scout, or anything else the host also
+    # declares at top level) resolve identically to what a real `nix build`
+    # against the parent-lock-derived flake.lock would give at switch time.
+    nixosModule = parent: modulesRel: hostInputs: {
+      _file = toString ./nixos-module.nix;
+      imports = [
+        (import ./nixos-module.nix {
+          nixScout = self;
+          inherit parent modulesRel flakelet;
+          inputs = hostInputs;
+        })
+      ];
+    };
+
+    packages = nixpkgs.lib.genAttrs supportedSystems mkPackages;
 
     checks.${system} = {
       static-contracts = pkgs.runCommand "nix-scout-static-contracts"
