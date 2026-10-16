@@ -3,13 +3,13 @@
 let
   system = "x86_64-linux";
   lib = nixpkgs.lib;
-  host = lib.nixosSystem {
+  mkHost = exclude: lib.nixosSystem {
     inherit system;
     specialArgs.self = ./adapter-host;
     modules = [
       home-manager.nixosModules.home-manager
       (import ../nixos-module.nix {
-        inherit flakelet;
+        inherit flakelet exclude;
         nixScout = nixScout;
         parent = "/tmp/nix-scout-adapter-host";
         modulesRel = "scout-modules";
@@ -30,6 +30,8 @@ let
       }
     ];
   };
+  host = mkHost [ ];
+  excludedHost = mkHost [ "fixture" ];
   scoutPackage = lib.findFirst
     (package: package.name == "scout-home-manager-files")
     (throw "missing adapted Home Manager scout package")
@@ -42,4 +44,6 @@ assert host.config.services.flakelets.services ? fixture;
 assert builtins.readFile "${scoutPackage}/home-files/.config/fixture/message" == "host-resolved";
 assert lib.hasInfix "nix-scout-settings" host.config.system.activationScripts.nix-scout-settings.text;
 assert lib.hasInfix "fixture.nix" host.config.system.activationScripts.nix-scout-settings.text;
+assert !(excludedHost.config.services.flakelets.services ? fixture);
+assert !(builtins.tryEval (mkHost [ "no-such-module" ]).config.services.flakelets.services).success;
 nixpkgs.legacyPackages.${system}.writeText "nix-scout-host-module-pass" "pass\n"

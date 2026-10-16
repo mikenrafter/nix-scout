@@ -82,6 +82,22 @@ imports = [
 ];
 ```
 
+To leave some modules out of one host's rebuild (for example a small machine
+that shares a modules directory with a bigger one), use the attrset form:
+
+```nix
+(inputs.nix-scout.nixosModuleWith {
+  parent = toString ./.;
+  modulesRel = "scout-modules";
+  inherit inputs;
+  exclude = [ "whishper" "litellm" ];
+})
+```
+
+Excluded modules contribute nothing to the rebuild: no packages, home
+files, baseline or flakelets. Unknown names fail evaluation. The `nix-scout`
+CLI still sees them, so `nix-scout switch <name>` works on demand.
+
 On activation this writes `/var/lib/nix-scout/paths` (`NIX_SCOUT_PARENT`,
 `NIX_SCOUT_MODULES`), which the `nix-scout` CLI reads at runtime — without
 it, every subcommand exits with a pointer back to this step. It also wires

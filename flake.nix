@@ -18,12 +18,6 @@
     system = "x86_64-linux";
     pkgs = nixpkgs.legacyPackages.${system};
     scoutModuleLib = import ./lib/scout-module.nix;
-    scoutScriptPath = pkgs.lib.makeBinPath [
-      pkgs.coreutils
-      pkgs.diffutils
-      pkgs.findutils
-      pkgs.jq
-    ];
     # nix-scout (the package consumed by nixos-module.nix / overlays.default)
     # is dontBuild=true — pure shell scripts wrapped with wrapProgram, fully
     # architecture-agnostic. Only the plugin involves native compilation, and
@@ -62,6 +56,7 @@
             pkgs.coreutils
             pkgs.findutils
             pkgs.gnugrep
+            pkgs.jq
             pkgs.nix
             pkgs.getent
           ]}
@@ -120,16 +115,18 @@
     # declared inputs (nixpkgs, nix-scout, or anything else the host also
     # declares at top level) resolve identically to what a real `nix build`
     # against the parent-lock-derived flake.lock would give at switch time.
-    nixosModule = parent: modulesRel: hostInputs: {
+    nixosModuleWith = { parent, modulesRel, inputs, exclude ? [ ] }: {
       _file = toString ./nixos-module.nix;
       imports = [
         (import ./nixos-module.nix {
           nixScout = self;
-          inherit parent modulesRel flakelet;
-          inputs = hostInputs;
+          inherit parent modulesRel flakelet inputs exclude;
         })
       ];
     };
+
+    nixosModule = parent: modulesRel: inputs:
+      self.nixosModuleWith { inherit parent modulesRel inputs; };
 
     packages = nixpkgs.lib.genAttrs supportedSystems mkPackages;
 

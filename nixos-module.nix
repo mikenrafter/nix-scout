@@ -1,9 +1,15 @@
-{ nixScout, parent, modulesRel, flakelet, inputs }:
+{ nixScout, parent, modulesRel, flakelet, inputs, exclude ? [ ] }:
 
 # nix-scout host framework — PATH, profile, HM copy-activator, generation-aware clear.
 # Scout payload modules live under ${parent}/${modulesRel} and are switched at runtime.
 #
 # Constructor: nixosModule parent modulesRel hostInputs
+#          or: nixosModuleWith { parent; modulesRel; inputs; exclude ? [ ]; }
+# `exclude` drops the named modules from this host's rebuild (packages, home
+# files, baseline, flakelets). It is a constructor argument rather than an
+# option because `imports` is computed from the module list and so cannot
+# depend on `config`. The `nix-scout` CLI reads the live tree directly and
+# still sees every module, so manual `nix-scout switch <name>` is unaffected.
 # Runtime paths: /var/lib/nix-scout/paths (written on activation).
 # Exposes pkgs.nix-scout via nixpkgs.overlays.default for scout-module flakes.
 #
@@ -64,9 +70,17 @@ let
     cp ${nixScoutPkg}/bin/nix-wrap $out/bin/nix
   '');
 
-  scoutDirs = lib.filterAttrs (name: v:
+  allScoutDirs = lib.filterAttrs (name: v:
     v == "directory" && builtins.pathExists (evalModulesDir + "/${name}/flake.nix")
   ) (builtins.readDir evalModulesDir);
+
+  unknownExcludes = builtins.filter (name: !(allScoutDirs ? ${name})) exclude;
+
+  scoutDirs =
+    if unknownExcludes != [ ] then
+      throw "nix-scout: exclude names modules not found in ${modulesRel}: ${lib.concatStringsSep ", " unknownExcludes}"
+    else
+      removeAttrs allScoutDirs exclude;
 
   # Every input a module's flake.nix declares must have a corresponding node
   # in its own committed flake.lock (see lib/update-module.sh / `nix-scout
