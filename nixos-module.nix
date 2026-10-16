@@ -38,7 +38,7 @@
 # mode is satisfied.  The live WIP path (`parent`) is written to the runtime paths
 # file and used for flakelet path: references so the CLI always sees the live tree.
 
-{ config, lib, pkgs, hostPkgs ? pkgs, self, ... }:
+{ config, lib, pkgs, self, ... }:
 
 let
   evalModulesDir    = "${self}/${modulesRel}";
@@ -175,8 +175,8 @@ let
           # Let helper-based scout modules reuse the host's already-imported
           # package set. Modules evaluated outside this path simply omit it
           # and keep their historical local nixpkgs import fallback.
-          pkgs = hostPkgs;
-          system = hostPkgs.stdenv.hostPlatform.system;
+          inherit pkgs;
+          system = pkgs.stdenv.hostPlatform.system;
           nix-scout = nixScout;
           systemRebuild = true;
           scoutContext = {
