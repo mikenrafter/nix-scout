@@ -30,20 +30,38 @@ rec {
   # standalone flakelet eval); callers pass ./. as moduleRoot and declare
   # inputs.nix-scout for this helper.
   # moduleRoot is usually ./. — used to read scout-context.nix during switch builds.
+  #
+  # A standalone `nix-scout switch` passes neither `system` nor host `pkgs`.
+  # The module is then built for every supported Linux system, so an aarch64
+  # host finds `packages.aarch64-linux.scout` (each system's pkgs is imported
+  # only when that attribute is forced). A rebuild hands over the host's pkgs
+  # and keeps the single-system result.
   mkScoutModule = moduleRoot: inputs: facets:
+    if inputs ? system || (inputs.pkgs or null) != null
+    then mkScoutModuleFor moduleRoot inputs facets (inputs.system or "x86_64-linux")
+    else
+      let
+        x86 = mkScoutModuleFor moduleRoot inputs facets "x86_64-linux";
+        arm = mkScoutModuleFor moduleRoot inputs facets "aarch64-linux";
+      in
+        x86 // { packages = (x86.packages or { }) // (arm.packages or { }); };
+
+  mkScoutModuleFor = moduleRoot: inputs: facets: system:
     let
       context = readContext moduleRoot inputs;
       isScoutEval =
         inputs.systemRebuild or false
         || context.mode == "rebuild"
         || context.mode == "switch";
-      system = inputs.system or "x86_64-linux";
       pkgs =
         if inputs ? pkgs && inputs.pkgs != null
         then inputs.pkgs
         else import inputs.nixpkgs { inherit system; };
+      # Facets read resolved settings from scoutContext; a switch only has
+      # them in scout-context.nix, so pass the context along.
       callArgs = inputs // {
         inherit system pkgs isScoutEval;
+        scoutContext = context;
         mode = if isScoutEval then "nix-scout" else "flakelet";
         systemRebuild = inputs.systemRebuild or false;
         lib = pkgs.lib;

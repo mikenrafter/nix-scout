@@ -41,6 +41,18 @@ let
     facets;
 
   flakelet = mkScoutModule ./. { inherit nixpkgs system; } facets;
+
+  # A standalone `nix-scout switch` passes no system and no pkgs: every
+  # supported Linux system must get its own scout package (aarch64 hosts).
+  # Settings arrive only through scout-context.nix, as in a real switch.
+  perSystem = mkScoutModule ./fixtures/switch-context
+    {
+      inherit nixpkgs;
+      nix-scout = nixScout;
+    }
+    (facets // { scout = { system, scoutContext ? { }, ... }: {
+      packages.${system}.scout = "${system}:${builtins.toJSON (scoutContext.settings.flag or false)}";
+    }; });
 in
 assert supplied.baseline._module.args.mkScoutTestMarker == "supplied";
 assert fallback.baseline._module.args.mkScoutTestMarker == "fallback";
@@ -49,4 +61,7 @@ assert builtins.hasAttr "homeBaseline" supplied;
 assert builtins.hasAttr "flakelets" supplied;
 assert builtins.attrNames flakelet == [ "flakelets" ];
 assert flakelet.flakelets.default._testMode == "flakelet";
+assert builtins.attrNames perSystem.packages == [ "aarch64-linux" "x86_64-linux" ];
+assert perSystem.packages.aarch64-linux.scout == "aarch64-linux:true";
+assert perSystem.packages.x86_64-linux.scout == "x86_64-linux:true";
 "pass"
