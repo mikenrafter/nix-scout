@@ -31,7 +31,10 @@ _priv_ln_sfn() {
 
 _priv_nix_env() {
   local profile="$1" store="$2"
-  if _can_write "$profile"; then
+  # nix-env writes new generation links beside the profile and swaps the
+  # symlink: it needs the directory. `-w` on the profile itself follows the
+  # link into the read-only store and is always false once it exists.
+  if _can_write "$(dirname "$profile")"; then
     nix-env -p "$profile" -i "$store"
   else
     echo "nix-scout: need elevated permissions for nix-env profile $profile" >&2

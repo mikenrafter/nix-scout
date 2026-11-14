@@ -41,6 +41,30 @@ else
   fail "scout-lib.sh not found (resolve_scout_lib_script failed)"
 fi
 
+# ── _priv_nix_env: an existing profile symlink in a writable dir needs no sudo ──
+# why: the profile is a symlink into the read-only store, so `-w` on it follows
+#      the link and was false; every update after the first asked for sudo.
+#      nix-env only needs to write the profile's directory.
+echo "-- _priv_nix_env: existing profile in a writable dir updates without sudo --"
+if [[ -n "$SCOUT_LIB" ]]; then
+  _pdir="$(mktemp -d)"
+  mkdir "$_pdir/readonly-target"; chmod 555 "$_pdir/readonly-target"
+  ln -s "$_pdir/readonly-target" "$_pdir/nix-scout"
+  _out="$(
+    # shellcheck source=/dev/null
+    source "$SCOUT_LIB"
+    nix-env() { echo "nix-env $*"; }
+    sudo() { echo "SUDO $*"; }
+    _priv_nix_env "$_pdir/nix-scout" /nix/store/fake-scout 2>&1
+  )"
+  if [[ "$_out" == "nix-env -p $_pdir/nix-scout -i /nix/store/fake-scout" ]]; then
+    pass "_priv_nix_env updates an existing profile without sudo"
+  else
+    fail "_priv_nix_env asked for sudo on a writable profile dir: $_out"
+  fi
+  chmod 755 "$_pdir/readonly-target"; rm -rf "$_pdir"
+fi
+
 # ── apply-hm.sh / apply-env.sh: self-detect, no hard exit 1 on absent facet ──
 echo "-- apply-hm.sh / apply-env.sh: self-detect (exit 0 when facet absent) --"
 for script in apply-hm.sh apply-env.sh; do
